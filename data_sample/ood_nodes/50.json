@@ -1,0 +1,31 @@
+{
+  "topic": "Analogical Reasoning",
+  "title": "Enhancing Analogical Reasoning through Metacognitive Introspection and Case-Based Learning",
+  "abstract": "Analogical reasoning is a fundamental cognitive process that enables individuals to solve new problems by leveraging prior experiences. This paper explores the integration of metacognitive introspection and case-based reasoning (CBR) to enhance analogical reasoning capabilities. Drawing on the principles outlined in the center paper, we propose a framework that utilizes introspection plans to regulate and refine analogical reasoning processes. By incorporating insights from related works on adaptive training systems and reflective learning, we demonstrate how previous experiences can be systematically reused to improve reasoning outcomes. Our approach is illustrated through the development of a computational model, Meta-Analog, which employs introspective reasoning to adapt its analogical reasoning strategies based on past successes and failures. Initial results indicate that this metacognitive approach significantly enhances the model's ability to identify relevant analogies and apply them effectively, thereby improving problem-solving performance. The findings underscore the potential of metacognitive strategies in advancing analogical reasoning systems and highlight avenues for future research in this domain.",
+  "strength": [
+    [
+      50,
+      5
+    ],
+    [
+      49,
+      3
+    ],
+    [
+      1214,
+      4
+    ],
+    [
+      1904,
+      1
+    ],
+    [
+      580,
+      4
+    ],
+    [
+      150,
+      3
+    ]
+  ]
+}

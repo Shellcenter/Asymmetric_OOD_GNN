@@ -1,0 +1,31 @@
+{
+  "topic": "Imitation Learning",
+  "title": "Imitation Learning in Large State Spaces: Bridging Statistical Mechanics and Reinforcement Learning",
+  "abstract": "In this paper, we explore the application of imitation learning within the framework of large state space Markov decision processes (MDPs), leveraging insights from statistical mechanics. The primary challenge in MDPs is balancing short-term and long-term rewards, which becomes exponentially complex as the state space size, N, increases. We propose an imitation learning approach that utilizes optimal policies derived from empirical estimates of expected returns, as informed by the energy landscape analysis from statistical mechanics. By integrating methods from dual control and reactive critics, we enhance the exploration-exploitation trade-off and adaptability of the learning process. Our methodology involves simulating agents in both hierarchical and flat architectures, demonstrating the practicality of our approach in both simulated and real-world environments. Numerical simulations validate our theoretical findings, showing significant improvements in policy convergence and performance. Our research bridges the gap between theoretical insights from statistical mechanics and practical applications in imitation learning, offering a robust framework for developing situated agents in complex environments.",
+  "strength": [
+    [
+      57,
+      5
+    ],
+    [
+      804,
+      3
+    ],
+    [
+      2629,
+      3
+    ],
+    [
+      636,
+      4
+    ],
+    [
+      2442,
+      2
+    ],
+    [
+      1741,
+      2
+    ]
+  ]
+}

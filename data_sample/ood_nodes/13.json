@@ -1,0 +1,31 @@
+{
+  "topic": "Analogical Reasoning",
+  "title": "Modeling Analogical Reasoning to Enhance Learning Paradigms: A Unified Approach to Utility and Performance Optimization",
+  "abstract": "Analogical reasoning, a cognitive process that leverages similarities between known and unknown situations, offers a promising avenue for addressing the utility problem in learning systems. This paper explores the integration of analogical reasoning into empirical and explanation-based learning frameworks to optimize the utility of learned knowledge. By modeling the performance response of analogical reasoning during learning, we propose a control system that constrains the amount of learned knowledge to achieve peak performance. Drawing on insights from statistical utility analysis and the challenges posed by noise and small disjuncts, we present a unified framework that enhances learning paradigms through analogical reasoning. Experimental results demonstrate the effectiveness of this approach in improving predictive accuracy and mitigating the overfit and utility problems. Our findings suggest that analogical reasoning can serve as a bridge between different learning paradigms, enabling more robust and efficient knowledge acquisition.",
+  "strength": [
+    [
+      13,
+      5
+    ],
+    [
+      251,
+      4
+    ],
+    [
+      1510,
+      3
+    ],
+    [
+      1234,
+      1
+    ],
+    [
+      1187,
+      1
+    ],
+    [
+      1275,
+      2
+    ]
+  ]
+}

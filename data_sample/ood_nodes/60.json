@@ -1,0 +1,31 @@
+{
+  "topic": "Imitation Learning",
+  "title": "Enhancing Imitation Learning through Modular Task Decomposition and Transfer in Dynamic Environments",
+  "abstract": "This paper explores the integration of modular network architectures and incremental dynamic programming to enhance imitation learning in dynamic, multi-task environments. We investigate how a single learning agent can efficiently acquire and transfer knowledge across multiple Markovian decision tasks (MDTs) by leveraging the temporal decomposition of composite tasks. Our methodology extends the principles of the Efficient Learning of Multiple Task Sequences, incorporating insights from multi-robot systems to handle noisy perception and inconsistent reinforcement. We demonstrate through experimental validation in simulated and real-world scenarios that our approach significantly improves learning efficiency and generalization. The results underscore the potential of modular task decomposition in fostering robust imitation learning, particularly in complex, dynamic domains.",
+  "strength": [
+    [
+      60,
+      5
+    ],
+    [
+      1213,
+      4
+    ],
+    [
+      1790,
+      1
+    ],
+    [
+      1616,
+      2
+    ],
+    [
+      472,
+      3
+    ],
+    [
+      1782,
+      2
+    ]
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "topic": "Imitation Learning",
+  "title": "Enhancing Job-shop Scheduling with Imitation Learning and Reinforcement Learning Techniques",
+  "abstract": "This paper explores the integration of imitation learning with reinforcement learning to improve the performance of job-shop scheduling systems. Building on the reinforcement learning approach presented in the center paper, we propose an enhanced method that incorporates imitation learning to accelerate the training of heuristic evaluation functions. We utilize expert demonstrations to pre-train a neural network, which is then fine-tuned using the temporal difference algorithm T D(). This hybrid approach is evaluated on both synthetic and real-world NASA space shuttle payload processing tasks. Our results indicate that the incorporation of imitation learning significantly reduces training time and improves the quality of the generated schedules, outperforming both traditional reinforcement learning methods and existing heuristic-based algorithms. The findings suggest that the synergy between imitation and reinforcement learning can provide a robust framework for constructing high-performance scheduling systems.",
+  "strength": [
+    [
+      82,
+      5
+    ],
+    [
+      2672,
+      2
+    ],
+    [
+      2078,
+      1
+    ],
+    [
+      1616,
+      3
+    ],
+    [
+      477,
+      1
+    ],
+    [
+      220,
+      1
+    ]
+  ]
+}

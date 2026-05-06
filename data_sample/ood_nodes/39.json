@@ -1,0 +1,31 @@
+{
+  "topic": "Imitation Learning",
+  "title": "Enhancing Imitation Learning through Structured Skill Discovery in Complex Environments",
+  "abstract": "Imitation learning aims to enable agents to learn effective behaviors by mimicking expert demonstrations. However, scaling imitation learning to complex real-world tasks requires the ability to discern and exploit underlying structure in the environment. This paper integrates the principles of structured skill discovery, as proposed in the SKILLS algorithm, into the framework of imitation learning. By identifying reusable skills that encapsulate sequences of actions, we enhance the efficiency and generalizability of imitation learning. Our methodology involves a two-step process: first, we use expert demonstrations to initialize a set of candidate skills; second, we refine these skills through a reinforcement learning phase that minimizes policy compactness. Empirical evaluations in diverse grid navigation and robotic manipulation tasks demonstrate that our approach significantly improves learning efficiency and performance compared to traditional imitation learning methods. The results underscore the importance of leveraging environmental structure in imitation learning, paving the way for more robust and scalable imitation learning systems.",
+  "strength": [
+    [
+      39,
+      5
+    ],
+    [
+      82,
+      2
+    ],
+    [
+      565,
+      3
+    ],
+    [
+      1440,
+      2
+    ],
+    [
+      269,
+      4
+    ],
+    [
+      548,
+      1
+    ]
+  ]
+}

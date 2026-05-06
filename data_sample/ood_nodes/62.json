@@ -1,0 +1,31 @@
+{
+  "topic": "Hidden Markov Models",
+  "title": "Context-Specific Independence in Hidden Markov Models for Enhanced Inference and Robustness",
+  "abstract": "Hidden Markov Models (HMMs) are powerful tools for modeling sequential data, but they often struggle with capturing context-specific independencies that can significantly impact inference accuracy and computational efficiency. Building on the concept of context-specific independence (CSI) introduced in Bayesian networks, this paper extends CSI to HMMs, proposing a novel framework for incorporating CSI into the transition and emission probabilities of HMMs. We introduce a structured representation scheme for CSI within HMMs, analogous to tree-structured CPTs, and demonstrate how this can be leveraged to improve inference algorithms. We also explore the robustness of HMMs with CSI under model perturbations, drawing insights from robust Bayesian inference techniques. Our empirical results show that incorporating CSI into HMMs not only enhances inference performance but also maintains robustness in dynamic environments. This work bridges the gap between Bayesian networks and HMMs, offering a new perspective on modeling and inference in sequential data analysis.",
+  "strength": [
+    [
+      62,
+      5
+    ],
+    [
+      389,
+      3
+    ],
+    [
+      1414,
+      4
+    ],
+    [
+      2341,
+      2
+    ],
+    [
+      2474,
+      1
+    ],
+    [
+      2531,
+      1
+    ]
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "topic": "Recurrent Neural Networks",
+  "title": "Enhancing Real-Time Control of Inverted Pendulum Systems Using Recurrent Neural Networks",
+  "abstract": "This paper explores the application of Recurrent Neural Networks (RNNs) to enhance the real-time control of inverted pendulum systems, building upon the foundational work presented in the neural network pole balancer. The research addresses the challenge of maintaining a rigid pole in a vertical orientation by moving a cart horizontally, with the added complexity of real-time learning and adaptation. We propose an RNN-based approach that leverages temporal dependencies in the system's state to improve control accuracy and robustness. The methodology involves training the RNN on historical data and real-time feedback, enabling it to predict and adjust cart movements more effectively. Experimental results demonstrate significant improvements in balance duration and cart position stability compared to traditional neural network methods. The findings suggest that RNNs are particularly suited for dynamic control tasks, offering a promising avenue for advanced robotic control systems.",
+  "strength": [
+    [
+      83,
+      5
+    ],
+    [
+      609,
+      1
+    ],
+    [
+      696,
+      3
+    ],
+    [
+      565,
+      4
+    ],
+    [
+      229,
+      1
+    ],
+    [
+      665,
+      2
+    ]
+  ]
+}

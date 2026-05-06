@@ -1,0 +1,19 @@
+{
+  "topic": "Hidden Markov Models",
+  "title": "Variational Inference for Hidden Markov Models: Enhancing Efficiency and Accuracy in Probabilistic Inference",
+  "abstract": "Graphical models, including Hidden Markov Models (HMMs), have significantly advanced the field of probabilistic modeling by providing a structured framework for representing complex dependencies. However, the computational complexity associated with exact inference in these models often renders them infeasible for large-scale applications. Building on the principled framework of variational methods proposed by Jordan et al., this paper explores the application of variational techniques to enhance the efficiency and accuracy of probabilistic inference in HMMs. We develop a unified approach that leverages variational methods to compute recursive upper and lower bounds on the quantities of interest, thereby providing an inherent error metric and enabling tailored approximations. Our methodology is demonstrated through rigorous empirical evaluations on benchmark datasets, showcasing significant improvements in computational efficiency and approximation accuracy. The results highlight the potential of variational inference to extend the applicability of HMMs in real-world scenarios, such as speech recognition and bioinformatics.",
+  "strength": [
+    [
+      4,
+      5
+    ],
+    [
+      170,
+      3
+    ],
+    [
+      250,
+      2
+    ]
+  ]
+}

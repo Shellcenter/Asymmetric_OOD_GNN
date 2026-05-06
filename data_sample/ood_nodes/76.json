@@ -1,0 +1,31 @@
+{
+  "topic": "Hidden Markov Models",
+  "title": "Enhancing Hidden Markov Models with Incremental and Sparse EM Variants for Improved Latent Variable Estimation",
+  "abstract": "Hidden Markov Models (HMMs) are powerful tools for modeling sequential data with latent variables. This paper explores the integration of incremental and sparse variants of the Expectation-Maximization (EM) algorithm to enhance the efficiency and accuracy of HMM parameter estimation. Drawing on the insights from the EM algorithm's function resembling negative free energy, we propose a novel approach that recalculates the distribution for a single unobserved variable in each E step, thereby accelerating convergence. We also investigate the exploitation of sparse conditional distributions to further optimize the algorithm. Empirical results on mixture estimation problems demonstrate significant improvements in both convergence speed and model performance. Our findings suggest that these EM variants can be effectively applied to HMMs, offering a robust framework for latent variable estimation in various domains.",
+  "strength": [
+    [
+      76,
+      5
+    ],
+    [
+      2227,
+      3
+    ],
+    [
+      33,
+      2
+    ],
+    [
+      392,
+      1
+    ],
+    [
+      36,
+      2
+    ],
+    [
+      1128,
+      1
+    ]
+  ]
+}
