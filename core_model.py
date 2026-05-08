@@ -7,7 +7,7 @@ with graph features and ``edge_index`` only.
 
 from __future__ import annotations
 
-from typing import Dict, Iterable
+from typing import Dict, Iterable, Tuple
 
 import numpy as np
 import torch
@@ -143,6 +143,48 @@ def compute_prototype_logits(
     embeddings = F.normalize(embeddings, p=2, dim=1)
     prototypes = F.normalize(prototypes, p=2, dim=1)
     return logit_scale * embeddings @ prototypes.t()
+
+
+def fit_mahalanobis_statistics(
+    embeddings: torch.Tensor,
+    labels: torch.Tensor,
+    class_ids: Iterable[int],
+    covariance_eps: float = 1e-4,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Estimate class means and shared precision matrix from ID train nodes."""
+
+    class_ids = tuple(class_ids)
+    means = []
+    centered_all = []
+    for class_id in class_ids:
+        class_mask = labels == int(class_id)
+        if not class_mask.any():
+            raise ValueError(f"Class {class_id} has no samples for Mahalanobis fitting.")
+        class_emb = embeddings[class_mask]
+        class_mean = class_emb.mean(dim=0)
+        means.append(class_mean)
+        centered_all.append(class_emb - class_mean)
+
+    means = torch.stack(means, dim=0)
+    centered = torch.cat(centered_all, dim=0)
+    feature_dim = centered.size(1)
+    dof = max(centered.size(0) - len(class_ids), 1)
+    covariance = (centered.t() @ centered) / float(dof)
+    covariance = covariance + covariance_eps * torch.eye(feature_dim, device=embeddings.device, dtype=embeddings.dtype)
+    precision = torch.linalg.pinv(covariance)
+    return means, precision
+
+
+def compute_mahalanobis_logits(
+    embeddings: torch.Tensor,
+    means: torch.Tensor,
+    precision: torch.Tensor,
+) -> torch.Tensor:
+    """Return negative squared Mahalanobis distance logits for each ID class."""
+
+    diff = embeddings.unsqueeze(1) - means.unsqueeze(0)  # [N, C, D]
+    md2 = torch.einsum("ncd,df,ncf->nc", diff, precision, diff)
+    return -0.5 * md2
 
 
 def _to_numpy(x: torch.Tensor | np.ndarray) -> np.ndarray:

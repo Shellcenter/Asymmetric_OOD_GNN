@@ -16,7 +16,13 @@ import torch
 import torch.nn.functional as F
 from torch_geometric.datasets import Planetoid
 
-from core_model import AsymmetricGNN, SupConDistillationLoss, compute_class_prototypes, compute_prototype_logits
+from core_model import (
+    AsymmetricGNN,
+    SupConDistillationLoss,
+    compute_class_prototypes,
+    compute_free_energy,
+    compute_prototype_logits,
+)
 
 
 ID_CLASSES = (0, 1, 2, 3)
@@ -75,6 +81,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--margin", type=float, default=1.0)
     parser.add_argument("--semantic_weight", type=float, default=0.2)
     parser.add_argument("--prototype_weight", type=float, default=1.0)
+    parser.add_argument("--energy_weight", type=float, default=0.2)
+    parser.add_argument("--energy_compact_weight", type=float, default=0.05)
+    parser.add_argument("--energy_margin", type=float, default=-6.0)
+    parser.add_argument("--energy_temperature", type=float, default=1.0)
     parser.add_argument("--logit_scale", type=float, default=10.0)
     parser.add_argument("--train_ratio", type=float, default=0.6)
     parser.add_argument("--seed", type=int, default=42)
@@ -130,7 +140,19 @@ def main() -> None:
             logit_scale=args.logit_scale,
         )
         prototype_loss = F.cross_entropy(prototype_logits, train_class_labels)
-        loss = args.semantic_weight * semantic_loss + args.prototype_weight * prototype_loss
+
+        # Energy-boundary alignment: make ID nodes occupy a low-energy basin
+        # without introducing any OOD sample into the optimization split.
+        train_energy = compute_free_energy(prototype_logits, temperature=args.energy_temperature)
+        energy_boundary_loss = F.relu(train_energy - args.energy_margin).pow(2).mean()
+        energy_compact_loss = train_energy.var(unbiased=False)
+
+        loss = (
+            args.semantic_weight * semantic_loss
+            + args.prototype_weight * prototype_loss
+            + args.energy_weight * energy_boundary_loss
+            + args.energy_compact_weight * energy_compact_loss
+        )
         loss.backward()
         optimizer.step()
 
@@ -139,7 +161,9 @@ def main() -> None:
                 f"Epoch {epoch:03d}/{args.epochs} | "
                 f"Loss: {loss.item():.6f} | "
                 f"Semantic: {semantic_loss.item():.6f} | "
-                f"Prototype CE: {prototype_loss.item():.6f}"
+                f"Prototype CE: {prototype_loss.item():.6f} | "
+                f"Energy Boundary: {energy_boundary_loss.item():.6f} | "
+                f"Energy Compact: {energy_compact_loss.item():.6f}"
             )
 
     model.eval()
@@ -158,6 +182,10 @@ def main() -> None:
             "ood_classes": OOD_CLASSES,
             "id_prototypes": id_prototypes,
             "logit_scale": args.logit_scale,
+            "energy_margin": args.energy_margin,
+            "energy_temperature": args.energy_temperature,
+            "energy_weight": args.energy_weight,
+            "energy_compact_weight": args.energy_compact_weight,
             "seed": args.seed,
             "train_ratio": args.train_ratio,
         },
