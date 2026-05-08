@@ -13,9 +13,10 @@ import random
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from torch_geometric.datasets import Planetoid
 
-from core_model import AsymmetricGNN, SupConDistillationLoss
+from core_model import AsymmetricGNN, SupConDistillationLoss, compute_class_prototypes, compute_prototype_logits
 
 
 ID_CLASSES = (0, 1, 2, 3)
@@ -72,6 +73,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lr", type=float, default=0.01)
     parser.add_argument("--weight_decay", type=float, default=5e-4)
     parser.add_argument("--margin", type=float, default=1.0)
+    parser.add_argument("--semantic_weight", type=float, default=0.2)
+    parser.add_argument("--prototype_weight", type=float, default=1.0)
+    parser.add_argument("--logit_scale", type=float, default=10.0)
     parser.add_argument("--train_ratio", type=float, default=0.6)
     parser.add_argument("--seed", type=int, default=42)
     return parser.parse_args()
@@ -105,6 +109,7 @@ def main() -> None:
     ).to(device)
     criterion = SupConDistillationLoss(margin=args.margin)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    train_class_labels = data.y[train_mask].long()
 
     print("=== Phase 2: Cross-Modal Distillation ===")
     print(f"ID classes: {ID_CLASSES} | OOD classes: {OOD_CLASSES}")
@@ -117,12 +122,30 @@ def main() -> None:
         z_topo = model(data.x, data.edge_index)
 
         # Strict leave-out: only pure ID train nodes participate in optimization.
-        loss = criterion(z_topo[train_mask], z_sem_anchor[train_mask], labels[train_mask])
+        semantic_loss = criterion(z_topo[train_mask], z_sem_anchor[train_mask], labels[train_mask])
+        train_prototypes = compute_class_prototypes(z_topo[train_mask], train_class_labels, ID_CLASSES)
+        prototype_logits = compute_prototype_logits(
+            z_topo[train_mask],
+            train_prototypes,
+            logit_scale=args.logit_scale,
+        )
+        prototype_loss = F.cross_entropy(prototype_logits, train_class_labels)
+        loss = args.semantic_weight * semantic_loss + args.prototype_weight * prototype_loss
         loss.backward()
         optimizer.step()
 
         if epoch == 1 or epoch % 10 == 0 or epoch == args.epochs:
-            print(f"Epoch {epoch:03d}/{args.epochs} | Distillation Loss: {loss.item():.6f}")
+            print(
+                f"Epoch {epoch:03d}/{args.epochs} | "
+                f"Loss: {loss.item():.6f} | "
+                f"Semantic: {semantic_loss.item():.6f} | "
+                f"Prototype CE: {prototype_loss.item():.6f}"
+            )
+
+    model.eval()
+    with torch.no_grad():
+        z_topo = model(data.x, data.edge_index)
+        id_prototypes = compute_class_prototypes(z_topo[train_mask], train_class_labels, ID_CLASSES).detach().cpu()
 
     os.makedirs(os.path.dirname(args.save_path), exist_ok=True)
     torch.save(
@@ -133,6 +156,8 @@ def main() -> None:
             "out_channels": z_sem_anchor.size(1),
             "id_classes": ID_CLASSES,
             "ood_classes": OOD_CLASSES,
+            "id_prototypes": id_prototypes,
+            "logit_scale": args.logit_scale,
             "seed": args.seed,
             "train_ratio": args.train_ratio,
         },

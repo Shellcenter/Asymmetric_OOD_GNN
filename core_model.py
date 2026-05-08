@@ -7,7 +7,7 @@ with graph features and ``edge_index`` only.
 
 from __future__ import annotations
 
-from typing import Dict
+from typing import Dict, Iterable
 
 import numpy as np
 import torch
@@ -111,6 +111,38 @@ def compute_free_energy(logits: torch.Tensor, temperature: float = 1.0) -> torch
     if temperature <= 0:
         raise ValueError("temperature must be positive.")
     return -temperature * torch.logsumexp(logits / temperature, dim=1)
+
+
+def compute_class_prototypes(
+    embeddings: torch.Tensor,
+    labels: torch.Tensor,
+    class_ids: Iterable[int],
+) -> torch.Tensor:
+    """Compute one normalized prototype per ID class.
+
+    The caller is responsible for passing only leakage-free training nodes.
+    """
+
+    prototypes = []
+    for class_id in class_ids:
+        class_mask = labels == int(class_id)
+        if not class_mask.any():
+            raise ValueError(f"Class {class_id} has no samples for prototype construction.")
+        prototype = embeddings[class_mask].mean(dim=0)
+        prototypes.append(prototype)
+    return F.normalize(torch.stack(prototypes, dim=0), p=2, dim=1)
+
+
+def compute_prototype_logits(
+    embeddings: torch.Tensor,
+    prototypes: torch.Tensor,
+    logit_scale: float = 10.0,
+) -> torch.Tensor:
+    """Convert embeddings into cosine-similarity logits against ID prototypes."""
+
+    embeddings = F.normalize(embeddings, p=2, dim=1)
+    prototypes = F.normalize(prototypes, p=2, dim=1)
+    return logit_scale * embeddings @ prototypes.t()
 
 
 def _to_numpy(x: torch.Tensor | np.ndarray) -> np.ndarray:

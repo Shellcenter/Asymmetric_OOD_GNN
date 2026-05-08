@@ -11,7 +11,7 @@ import numpy as np
 import torch
 from torch_geometric.datasets import Planetoid
 
-from core_model import AsymmetricGNN, compute_free_energy, evaluate_ood_metrics
+from core_model import AsymmetricGNN, compute_free_energy, compute_prototype_logits, evaluate_ood_metrics
 
 
 ID_CLASSES = (0, 1, 2, 3)
@@ -76,6 +76,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--data_root", type=str, default="./data")
     parser.add_argument("--weights_path", type=str, default="./weights/cora_gnn.pth")
     parser.add_argument("--temperature", type=float, default=1.0)
+    parser.add_argument("--warmup", type=int, default=5)
+    parser.add_argument("--runs", type=int, default=20)
     parser.add_argument("--seed", type=int, default=42)
     return parser.parse_args()
 
@@ -92,6 +94,13 @@ def main() -> None:
     data = dataset[0].to(device)
 
     model, config = load_model(args.weights_path, dataset.num_features, device)
+    if "id_prototypes" not in config:
+        raise KeyError(
+            "Checkpoint does not contain ID prototypes. Re-run `python 02_train_distill.py` "
+            "to create a prototype-calibrated asymmetric checkpoint."
+        )
+    id_prototypes = config["id_prototypes"].to(device).float()
+    logit_scale = float(config.get("logit_scale", 10.0))
     eval_id_mask, eval_ood_mask = build_eval_masks(
         data.y,
         train_ratio=float(config.get("train_ratio", 0.6)),
@@ -100,25 +109,33 @@ def main() -> None:
     eval_id_mask = eval_id_mask.to(device)
     eval_ood_mask = eval_ood_mask.to(device)
 
+    with torch.no_grad():
+        for _ in range(args.warmup):
+            z_topo = model(data.x, data.edge_index)
+            logits = compute_prototype_logits(z_topo, id_prototypes, logit_scale=logit_scale)
+            _ = compute_free_energy(logits, temperature=args.temperature)
+
     if device.type == "cuda":
         torch.cuda.synchronize()
     start_time = time.perf_counter()
     with torch.no_grad():
-        # Online contract: the model receives only graph topology features and edge_index.
-        z_topo = model(data.x, data.edge_index)
-        energy = compute_free_energy(z_topo, temperature=args.temperature)
+        for _ in range(args.runs):
+            # Online contract: the model receives only graph topology features and edge_index.
+            z_topo = model(data.x, data.edge_index)
+            logits = compute_prototype_logits(z_topo, id_prototypes, logit_scale=logit_scale)
+            energy = compute_free_energy(logits, temperature=args.temperature)
     if device.type == "cuda":
         torch.cuda.synchronize()
-    latency_ms = (time.perf_counter() - start_time) * 1000.0
+    latency_ms = (time.perf_counter() - start_time) * 1000.0 / args.runs
 
     metrics = evaluate_ood_metrics(energy[eval_id_mask], energy[eval_ood_mask])
 
     print("=== Phase 3: Online Asymmetric Inference ===")
-    print("LLM features are not loaded. Input contract: model(x, edge_index) only.")
+    print("LLM features are not loaded. Input contract: model(x, edge_index) plus frozen ID prototypes.")
     print(f"AUROC: {metrics['AUROC']:.4f}")
     print(f"AUPR: {metrics['AUPR']:.4f}")
     print(f"FPR@95TPR: {metrics['FPR95']:.4f}")
-    print(f"Full-graph latency: {latency_ms:.4f} ms")
+    print(f"Average full-graph latency over {args.runs} runs: {latency_ms:.4f} ms")
 
 
 if __name__ == "__main__":
