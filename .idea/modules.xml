@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/Asymmetric_OOD_GNN.iml" filepath="$PROJECT_DIR$/.idea/Asymmetric_OOD_GNN.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/AsymOOD.iml" filepath="$PROJECT_DIR$/.idea/AsymOOD.iml" />
     </modules>
   </component>
 </project>
