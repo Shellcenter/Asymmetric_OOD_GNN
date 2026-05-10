@@ -100,6 +100,25 @@ class SupConDistillationLoss(nn.Module):
         return pull_id + self.ood_weight * push_ood
 
 
+class IDEnergyBoundaryLoss(nn.Module):
+    """Low-energy basin regularizer for ID-only training.
+
+    This loss never needs OOD samples. It simply enforces the invariant that
+    known ID training nodes should have energy below a target margin and should
+    occupy a compact energy distribution.
+    """
+
+    def __init__(self, margin: float = -6.0, compact_weight: float = 0.05):
+        super().__init__()
+        self.margin = margin
+        self.compact_weight = compact_weight
+
+    def forward(self, energy: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        boundary_loss = F.relu(energy - self.margin).pow(2).mean()
+        compact_loss = energy.var(unbiased=False)
+        return boundary_loss + self.compact_weight * compact_loss, boundary_loss, compact_loss
+
+
 def compute_free_energy(logits: torch.Tensor, temperature: float = 1.0) -> torch.Tensor:
     """Compute the thermodynamic free energy score.
 

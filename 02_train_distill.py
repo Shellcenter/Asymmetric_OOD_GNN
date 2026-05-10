@@ -18,6 +18,7 @@ from torch_geometric.datasets import Planetoid
 
 from core_model import (
     AsymmetricGNN,
+    IDEnergyBoundaryLoss,
     SupConDistillationLoss,
     compute_class_prototypes,
     compute_free_energy,
@@ -118,6 +119,7 @@ def main() -> None:
         out_channels=z_sem_anchor.size(1),
     ).to(device)
     criterion = SupConDistillationLoss(margin=args.margin)
+    energy_criterion = IDEnergyBoundaryLoss(margin=args.energy_margin, compact_weight=args.energy_compact_weight)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     train_class_labels = data.y[train_mask].long()
 
@@ -144,14 +146,12 @@ def main() -> None:
         # Energy-boundary alignment: make ID nodes occupy a low-energy basin
         # without introducing any OOD sample into the optimization split.
         train_energy = compute_free_energy(prototype_logits, temperature=args.energy_temperature)
-        energy_boundary_loss = F.relu(train_energy - args.energy_margin).pow(2).mean()
-        energy_compact_loss = train_energy.var(unbiased=False)
+        energy_loss, energy_boundary_loss, energy_compact_loss = energy_criterion(train_energy)
 
         loss = (
             args.semantic_weight * semantic_loss
             + args.prototype_weight * prototype_loss
-            + args.energy_weight * energy_boundary_loss
-            + args.energy_compact_weight * energy_compact_loss
+            + args.energy_weight * energy_loss
         )
         loss.backward()
         optimizer.step()
