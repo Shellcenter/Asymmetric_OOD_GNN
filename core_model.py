@@ -1,13 +1,8 @@
-"""Core components for asymmetric graph OOD detection.
-
-This module intentionally contains no dataset-specific logic. The LLM semantic
-anchors are consumed only during distillation; online inference uses the GNN
-with graph features and ``edge_index`` only.
-"""
+"""Model components and scoring utilities for asymmetric graph OOD detection."""
 
 from __future__ import annotations
 
-from typing import Dict, Iterable, Tuple
+from collections.abc import Iterable
 
 import numpy as np
 import torch
@@ -18,7 +13,7 @@ from torch_geometric.nn import GCNConv
 
 
 class MLPDynamicProjector(nn.Module):
-    """Projection head that maps GNN topology features to the anchor space."""
+    """MLP projection head for the semantic anchor space."""
 
     def __init__(self, input_dim: int, hidden_dim: int, output_dim: int, dropout: float = 0.2):
         super().__init__()
@@ -35,7 +30,7 @@ class MLPDynamicProjector(nn.Module):
 
 
 class AsymmetricGNN(nn.Module):
-    """Two-layer GCN encoder followed by a lightweight projection MLP."""
+    """Two-layer GCN encoder with a projection head."""
 
     def __init__(
         self,
@@ -66,11 +61,11 @@ class AsymmetricGNN(nn.Module):
 
 
 class SupConDistillationLoss(nn.Module):
-    """Supervised contrastive distillation with an ID pull and OOD margin push.
+    """Supervised distillation loss with an optional OOD margin.
 
-    ``labels`` follows the binary OOD convention: 0 for ID nodes and 1 for OOD
-    nodes. If a pure ID training split is provided, the OOD term is exactly zero,
-    which preserves strict leave-out evaluation.
+    Args:
+        margin: Minimum distance enforced for OOD samples.
+        ood_weight: Weight of the margin term.
     """
 
     def __init__(self, margin: float = 1.0, ood_weight: float = 1.0):
@@ -84,8 +79,21 @@ class SupConDistillationLoss(nn.Module):
         z_sem: torch.Tensor,
         labels: torch.Tensor,
     ) -> torch.Tensor:
+        """Compute the distillation objective.
+
+        Args:
+            z_topo: GNN embeddings with shape ``[N, D]``.
+            z_sem: Frozen semantic anchors with shape ``[N, D]``.
+            labels: Binary labels, where 0 denotes ID and 1 denotes OOD.
+
+        Returns:
+            Scalar loss.
+        """
         if z_topo.shape != z_sem.shape:
-            raise ValueError(f"Shape mismatch: z_topo={tuple(z_topo.shape)}, z_sem={tuple(z_sem.shape)}")
+            raise ValueError(
+                "Topology embeddings and semantic anchors must have identical "
+                f"shape, got {tuple(z_topo.shape)} and {tuple(z_sem.shape)}."
+            )
 
         z_topo = F.normalize(z_topo, p=2, dim=1)
         z_sem = F.normalize(z_sem, p=2, dim=1)
@@ -101,11 +109,11 @@ class SupConDistillationLoss(nn.Module):
 
 
 class IDEnergyBoundaryLoss(nn.Module):
-    """Low-energy basin regularizer for ID-only training.
+    """ID-only energy compactness regularizer.
 
-    This loss never needs OOD samples. It simply enforces the invariant that
-    known ID training nodes should have energy below a target margin and should
-    occupy a compact energy distribution.
+    Args:
+        margin: Target upper bound for ID free energy.
+        compact_weight: Weight for the energy variance penalty.
     """
 
     def __init__(self, margin: float = -6.0, compact_weight: float = 0.05):
@@ -113,22 +121,26 @@ class IDEnergyBoundaryLoss(nn.Module):
         self.margin = margin
         self.compact_weight = compact_weight
 
-    def forward(self, energy: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward(self, energy: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Compute boundary and compactness penalties."""
         boundary_loss = F.relu(energy - self.margin).pow(2).mean()
         compact_loss = energy.var(unbiased=False)
         return boundary_loss + self.compact_weight * compact_loss, boundary_loss, compact_loss
 
 
 def compute_free_energy(logits: torch.Tensor, temperature: float = 1.0) -> torch.Tensor:
-    """Compute the thermodynamic free energy score.
+    """Compute free-energy OOD scores.
 
-    Higher returned values are treated as more OOD-like. The implementation uses
-    ``-T * logsumexp`` from energy-based OOD detection; downstream code compares
-    the resulting scalar scores directly.
+    Args:
+        logits: Class or prototype logits with shape ``[N, C]``.
+        temperature: Positive temperature parameter.
+
+    Returns:
+        Free-energy scores. Larger values indicate stronger OOD evidence.
     """
 
     if temperature <= 0:
-        raise ValueError("temperature must be positive.")
+        raise ValueError("Temperature must be positive.")
     return -temperature * torch.logsumexp(logits / temperature, dim=1)
 
 
@@ -137,16 +149,13 @@ def compute_class_prototypes(
     labels: torch.Tensor,
     class_ids: Iterable[int],
 ) -> torch.Tensor:
-    """Compute one normalized prototype per ID class.
-
-    The caller is responsible for passing only leakage-free training nodes.
-    """
+    """Compute normalized class prototypes."""
 
     prototypes = []
     for class_id in class_ids:
         class_mask = labels == int(class_id)
         if not class_mask.any():
-            raise ValueError(f"Class {class_id} has no samples for prototype construction.")
+            raise ValueError(f"Class {class_id} has no samples for prototype estimation.")
         prototype = embeddings[class_mask].mean(dim=0)
         prototypes.append(prototype)
     return F.normalize(torch.stack(prototypes, dim=0), p=2, dim=1)
@@ -157,7 +166,7 @@ def compute_prototype_logits(
     prototypes: torch.Tensor,
     logit_scale: float = 10.0,
 ) -> torch.Tensor:
-    """Convert embeddings into cosine-similarity logits against ID prototypes."""
+    """Compute cosine-similarity logits against class prototypes."""
 
     embeddings = F.normalize(embeddings, p=2, dim=1)
     prototypes = F.normalize(prototypes, p=2, dim=1)
@@ -169,8 +178,8 @@ def fit_mahalanobis_statistics(
     labels: torch.Tensor,
     class_ids: Iterable[int],
     covariance_eps: float = 1e-4,
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Estimate class means and shared precision matrix from ID train nodes."""
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Estimate class means and a shared precision matrix."""
 
     class_ids = tuple(class_ids)
     means = []
@@ -178,7 +187,7 @@ def fit_mahalanobis_statistics(
     for class_id in class_ids:
         class_mask = labels == int(class_id)
         if not class_mask.any():
-            raise ValueError(f"Class {class_id} has no samples for Mahalanobis fitting.")
+            raise ValueError(f"Class {class_id} has no samples for covariance estimation.")
         class_emb = embeddings[class_mask]
         class_mean = class_emb.mean(dim=0)
         means.append(class_mean)
@@ -199,9 +208,9 @@ def compute_mahalanobis_logits(
     means: torch.Tensor,
     precision: torch.Tensor,
 ) -> torch.Tensor:
-    """Return negative squared Mahalanobis distance logits for each ID class."""
+    """Compute negative squared Mahalanobis-distance logits."""
 
-    diff = embeddings.unsqueeze(1) - means.unsqueeze(0)  # [N, C, D]
+    diff = embeddings.unsqueeze(1) - means.unsqueeze(0)
     md2 = torch.einsum("ncd,df,ncf->nc", diff, precision, diff)
     return -0.5 * md2
 
@@ -212,11 +221,18 @@ def _to_numpy(x: torch.Tensor | np.ndarray) -> np.ndarray:
     return np.asarray(x, dtype=np.float64)
 
 
-def evaluate_ood_metrics(energy_ind: torch.Tensor | np.ndarray, energy_ood: torch.Tensor | np.ndarray) -> Dict[str, float]:
-    """Return AUROC, AUPR, and FPR@95TPR for OOD scores.
+def evaluate_ood_metrics(
+    energy_ind: torch.Tensor | np.ndarray,
+    energy_ood: torch.Tensor | np.ndarray,
+) -> dict[str, float]:
+    """Evaluate OOD detection metrics.
 
-    The metric convention is binary: ID nodes are negatives (0), OOD nodes are
-    positives (1), and larger scores indicate stronger OOD evidence.
+    Args:
+        energy_ind: Scores for ID samples.
+        energy_ood: Scores for OOD samples.
+
+    Returns:
+        Dictionary with AUROC, AUPR, and FPR95.
     """
 
     ind_scores = _to_numpy(energy_ind)

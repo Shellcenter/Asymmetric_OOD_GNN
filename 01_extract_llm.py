@@ -8,6 +8,7 @@ only artifact consumed by the distillation phase.
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import random
 
@@ -16,7 +17,11 @@ import torch
 from torch_geometric.datasets import Planetoid
 
 
+LOGGER = logging.getLogger(__name__)
+
+
 def set_seed(seed: int) -> None:
+    """Set random seeds for reproducible feature extraction."""
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -25,6 +30,7 @@ def set_seed(seed: int) -> None:
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Offline semantic anchor extraction on Cora.")
     parser.add_argument("--data_root", type=str, default="./data", help="Root directory for PyG datasets.")
     parser.add_argument("--output_path", type=str, default="./embeddings/cora_llm_anchor.pt")
@@ -34,6 +40,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """Run offline anchor extraction."""
+    logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
     args = parse_args()
     set_seed(args.seed)
 
@@ -41,7 +49,6 @@ def main() -> None:
     dataset = Planetoid(root=os.path.join(args.data_root, "Cora"), name="Cora")
     data = dataset[0].to(device)
 
-    # A frozen linear layer stands in for a very large pretrained LLM encoder.
     llm_surrogate = torch.nn.Linear(dataset.num_features, args.anchor_dim, bias=False).to(device)
     llm_surrogate.requires_grad_(False)
     llm_surrogate.eval()
@@ -52,11 +59,10 @@ def main() -> None:
     os.makedirs(os.path.dirname(args.output_path), exist_ok=True)
     torch.save(z_sem_anchor, args.output_path)
 
-    print("=== Phase 1: Offline Semantic Anchor Generation ===")
-    print(f"Dataset: Cora | Nodes: {data.num_nodes} | Input dim: {dataset.num_features}")
-    print(f"Frozen anchor shape: {tuple(z_sem_anchor.shape)}")
-    print(f"Saved semantic anchors to: {args.output_path}")
-    print("The simulated LLM is now unloaded from all downstream phases.")
+    LOGGER.info("Phase 1: offline semantic anchor generation")
+    LOGGER.info("Dataset=Cora nodes=%d input_dim=%d", data.num_nodes, dataset.num_features)
+    LOGGER.info("anchor_shape=%s", tuple(z_sem_anchor.shape))
+    LOGGER.info("saved=%s", args.output_path)
 
 
 if __name__ == "__main__":

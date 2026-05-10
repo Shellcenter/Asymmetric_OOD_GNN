@@ -8,6 +8,7 @@ classes 0-3 are in-distribution (ID), classes 4-6 are out-of-distribution
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import random
 
@@ -28,9 +29,11 @@ from core_model import (
 
 ID_CLASSES = (0, 1, 2, 3)
 OOD_CLASSES = (4, 5, 6)
+LOGGER = logging.getLogger(__name__)
 
 
 def set_seed(seed: int) -> None:
+    """Set all random seeds used by training."""
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -41,6 +44,7 @@ def set_seed(seed: int) -> None:
 
 
 def build_leave_out_masks(y: torch.Tensor, train_ratio: float, seed: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Build ID-only training and mixed evaluation masks."""
     labels = torch.ones_like(y, dtype=torch.long)
     id_mask = torch.zeros_like(y, dtype=torch.bool)
 
@@ -65,12 +69,13 @@ def build_leave_out_masks(y: torch.Tensor, train_ratio: float, seed: int) -> tup
     test_mask[id_indices[perm[train_size:]]] = True
     test_mask[ood_mask] = True
 
-    # Academic leakage fuse: no OOD node can enter the optimization split.
-    assert labels[train_mask].sum().item() == 0, "Data leakage: train_mask contains OOD nodes."
+    if labels[train_mask].sum().item() != 0:
+        raise RuntimeError("Training mask contains OOD nodes.")
     return labels, train_mask, test_mask
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Cross-modal distillation for asymmetric graph OOD detection.")
     parser.add_argument("--data_root", type=str, default="./data")
     parser.add_argument("--anchor_path", type=str, default="./embeddings/cora_llm_anchor.pt")
@@ -93,6 +98,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """Train the distilled asymmetric GNN."""
+    logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
     args = parse_args()
     set_seed(args.seed)
 
@@ -123,17 +130,15 @@ def main() -> None:
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     train_class_labels = data.y[train_mask].long()
 
-    print("=== Phase 2: Cross-Modal Distillation ===")
-    print(f"ID classes: {ID_CLASSES} | OOD classes: {OOD_CLASSES}")
-    print(f"Train ID nodes: {int(train_mask.sum())} | Evaluation nodes: {int(test_mask.sum())}")
-    print("LLM anchors are loaded as frozen tensors; no LLM module is attached to training.")
+    LOGGER.info("Phase 2: cross-modal distillation")
+    LOGGER.info("id_classes=%s ood_classes=%s", ID_CLASSES, OOD_CLASSES)
+    LOGGER.info("train_id_nodes=%d eval_nodes=%d", int(train_mask.sum()), int(test_mask.sum()))
 
     for epoch in range(1, args.epochs + 1):
         model.train()
         optimizer.zero_grad()
         z_topo = model(data.x, data.edge_index)
 
-        # Strict leave-out: only pure ID train nodes participate in optimization.
         semantic_loss = criterion(z_topo[train_mask], z_sem_anchor[train_mask], labels[train_mask])
         train_prototypes = compute_class_prototypes(z_topo[train_mask], train_class_labels, ID_CLASSES)
         prototype_logits = compute_prototype_logits(
@@ -143,8 +148,6 @@ def main() -> None:
         )
         prototype_loss = F.cross_entropy(prototype_logits, train_class_labels)
 
-        # Energy-boundary alignment: make ID nodes occupy a low-energy basin
-        # without introducing any OOD sample into the optimization split.
         train_energy = compute_free_energy(prototype_logits, temperature=args.energy_temperature)
         energy_loss, energy_boundary_loss, energy_compact_loss = energy_criterion(train_energy)
 
@@ -157,13 +160,16 @@ def main() -> None:
         optimizer.step()
 
         if epoch == 1 or epoch % 10 == 0 or epoch == args.epochs:
-            print(
-                f"Epoch {epoch:03d}/{args.epochs} | "
-                f"Loss: {loss.item():.6f} | "
-                f"Semantic: {semantic_loss.item():.6f} | "
-                f"Prototype CE: {prototype_loss.item():.6f} | "
-                f"Energy Boundary: {energy_boundary_loss.item():.6f} | "
-                f"Energy Compact: {energy_compact_loss.item():.6f}"
+            LOGGER.info(
+                "epoch=%03d/%03d loss=%.6f semantic=%.6f prototype_ce=%.6f "
+                "energy_boundary=%.6f energy_compact=%.6f",
+                epoch,
+                args.epochs,
+                loss.item(),
+                semantic_loss.item(),
+                prototype_loss.item(),
+                energy_boundary_loss.item(),
+                energy_compact_loss.item(),
             )
 
     model.eval()
@@ -191,7 +197,7 @@ def main() -> None:
         },
         args.save_path,
     )
-    print(f"Saved distilled asymmetric GNN to: {args.save_path}")
+    LOGGER.info("saved=%s", args.save_path)
 
 
 if __name__ == "__main__":

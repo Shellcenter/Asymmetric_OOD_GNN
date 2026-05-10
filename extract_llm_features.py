@@ -1,24 +1,27 @@
-import os
+"""Legacy entry point for semantic feature extraction."""
+
+from __future__ import annotations
+
 import argparse
-import torch
-from transformers import AutoModel
-from torch_geometric.datasets import Planetoid
+import logging
 
 
-def main():
+LOGGER = logging.getLogger(__name__)
+
+
+def parse_args() -> argparse.Namespace:
+    """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Extract Text Attributes using LLM")
-    parser.add_argument('--dataset', type=str, default='Cora')
-    args = parser.parse_args()
+    parser.add_argument("--dataset", type=str, default="Cora")
+    return parser.parse_args()
 
-    print(f"Placeholder script to extract semantic text vectors for {args.dataset}.")
-    print("In production, map node text attributes through HuggingFace Transformers.")
 
-    # Example logic:
-    # 1. texts = load_raw_text(dataset)
-    # 2. tokenizer = AutoTokenizer.from_pretrained('bert-base-uncased')
-    # 3. model = AutoModel.from_pretrained('bert-base-uncased')
-    # 4. embeddings = model(**tokenizer(texts)).pooler_output
-    # 5. torch.save(embeddings, f"{args.dataset}.emb")
+def main() -> None:
+    """Report the legacy extraction entry point."""
+    logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
+    args = parse_args()
+    LOGGER.info("dataset=%s status=legacy_entry_point", args.dataset)
+    LOGGER.info("Use 01_extract_llm.py for the reproducible Cora anchor pipeline.")
 
 
 if __name__ == "__main__":

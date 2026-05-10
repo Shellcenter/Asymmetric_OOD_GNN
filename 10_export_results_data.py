@@ -10,14 +10,17 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import logging
 import os
 from typing import Any
 
 
 MAIN_TABLE_CONFIG = "ew03_m-6"
+LOGGER = logging.getLogger(__name__)
 
 
 def read_rows(path: str) -> list[dict[str, Any]]:
+    """Read sweep rows from a CSV file."""
     with open(path, "r", encoding="utf-8", newline="") as f:
         rows = list(csv.DictReader(f))
     if not rows:
@@ -26,14 +29,17 @@ def read_rows(path: str) -> list[dict[str, Any]]:
 
 
 def as_float(value: Any) -> float:
+    """Convert a scalar value to float."""
     return float(value)
 
 
 def select_fields(rows: list[dict[str, Any]], fields: list[str]) -> list[dict[str, Any]]:
+    """Select a subset of columns from all rows."""
     return [{field: row[field] for field in fields} for row in rows]
 
 
 def write_csv(path: str, rows: list[dict[str, Any]]) -> None:
+    """Write rows to a CSV file."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
@@ -42,16 +48,19 @@ def write_csv(path: str, rows: list[dict[str, Any]]) -> None:
 
 
 def write_json(path: str, payload: Any) -> None:
+    """Write a JSON payload."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
 
 
 def format_metric(mean: str, std: str) -> str:
+    """Format a metric as mean +/- std."""
     return f"{as_float(mean):.4f} +/- {as_float(std):.4f}"
 
 
 def build_main_recommendation(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Build the recommended main-table configuration record."""
     by_name = {row["name"]: row for row in rows}
     if MAIN_TABLE_CONFIG not in by_name:
         raise KeyError(f"Missing main-table config: {MAIN_TABLE_CONFIG}")
@@ -87,6 +96,7 @@ def build_main_recommendation(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Export categorized experiment result files.")
     parser.add_argument("--summary_csv", type=str, default="./sweep_results/energy_boundary/summary.csv")
     parser.add_argument("--output_dir", type=str, default="./results_data")
@@ -94,6 +104,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """Export categorized result files."""
+    logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
     args = parse_args()
     rows = read_rows(args.summary_csv)
 
@@ -145,7 +157,7 @@ def main() -> None:
         build_main_recommendation(rows),
     )
 
-    print(f"Exported categorized result files to: {args.output_dir}")
+    LOGGER.info("exported=%s", args.output_dir)
 
 
 if __name__ == "__main__":

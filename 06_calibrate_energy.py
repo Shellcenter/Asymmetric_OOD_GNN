@@ -9,6 +9,7 @@ This script keeps the asymmetric constraint:
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import random
 from dataclasses import dataclass
@@ -22,9 +23,11 @@ from core_model import AsymmetricGNN, compute_free_energy, compute_prototype_log
 
 ID_CLASSES = (0, 1, 2, 3)
 OOD_CLASSES = (4, 5, 6)
+LOGGER = logging.getLogger(__name__)
 
 
 def set_seed(seed: int) -> None:
+    """Set random seeds for calibration."""
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -34,6 +37,8 @@ def set_seed(seed: int) -> None:
 
 @dataclass
 class SplitMasks:
+    """Boolean masks for calibration splits."""
+
     train_id: torch.Tensor
     val_id: torch.Tensor
     test_id: torch.Tensor
@@ -42,12 +47,14 @@ class SplitMasks:
 
 
 def _split_indices(indices: torch.Tensor, first_ratio: float, generator: torch.Generator) -> tuple[torch.Tensor, torch.Tensor]:
+    """Split indices with a deterministic generator."""
     perm = torch.randperm(indices.numel(), generator=generator, device=indices.device)
     first_size = int(first_ratio * indices.numel())
     return indices[perm[:first_size]], indices[perm[first_size:]]
 
 
 def build_protocol_masks(y: torch.Tensor, train_ratio: float, val_ratio: float, seed: int) -> SplitMasks:
+    """Build train, validation, and test masks."""
     id_mask = torch.zeros_like(y, dtype=torch.bool)
     for cls in ID_CLASSES:
         id_mask |= y == cls
@@ -80,6 +87,7 @@ def build_protocol_masks(y: torch.Tensor, train_ratio: float, val_ratio: float, 
 
 
 def load_model(checkpoint_path: str, in_channels: int, device: torch.device) -> tuple[AsymmetricGNN, dict]:
+    """Load a prototype-calibrated GNN checkpoint."""
     checkpoint = torch.load(checkpoint_path, map_location=device)
     if "model_state_dict" not in checkpoint:
         raise KeyError("Expected checkpoint with `model_state_dict` and prototype metadata.")
@@ -94,6 +102,7 @@ def load_model(checkpoint_path: str, in_channels: int, device: torch.device) -> 
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Calibrate free-energy temperature on Cora.")
     parser.add_argument("--data_root", type=str, default="./data")
     parser.add_argument("--weights_path", type=str, default="./weights/cora_gnn.pth")
@@ -108,6 +117,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """Calibrate free-energy temperature."""
+    logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
     args = parse_args()
     set_seed(args.seed)
 
@@ -140,7 +151,6 @@ def main() -> None:
     for temp in temp_grid.tolist():
         energy = compute_free_energy(logits, temperature=float(temp))
         val_metrics = evaluate_ood_metrics(energy[masks.val_id], energy[masks.val_ood])
-        # Primary objective: minimize FPR95; tie-break with AUROC (higher is better).
         score_tuple = (val_metrics["FPR95"], -val_metrics["AUROC"])
         if best_score is None or score_tuple < best_score:
             best_score = score_tuple
@@ -164,26 +174,29 @@ def main() -> None:
         args.save_path,
     )
 
-    print("=== Phase 6: Energy Temperature Calibration ===")
-    print(
-        f"Split sizes | Train ID: {int(masks.train_id.sum())}, "
-        f"Val ID: {int(masks.val_id.sum())}, Test ID: {int(masks.test_id.sum())}, "
-        f"Val OOD: {int(masks.val_ood.sum())}, Test OOD: {int(masks.test_ood.sum())}"
+    LOGGER.info("Phase 6: energy temperature calibration")
+    LOGGER.info(
+        "train_id=%d val_id=%d test_id=%d val_ood=%d test_ood=%d",
+        int(masks.train_id.sum()),
+        int(masks.val_id.sum()),
+        int(masks.test_id.sum()),
+        int(masks.val_ood.sum()),
+        int(masks.test_ood.sum()),
     )
-    print(f"Selected temperature: {best_temperature:.4f}")
-    print(
-        "Validation metrics | "
-        f"AUROC: {best_metrics['AUROC']:.4f}, "
-        f"AUPR: {best_metrics['AUPR']:.4f}, "
-        f"FPR@95TPR: {best_metrics['FPR95']:.4f}"
+    LOGGER.info("selected_temperature=%.4f", best_temperature)
+    LOGGER.info(
+        "split=validation AUROC=%.4f AUPR=%.4f FPR95=%.4f",
+        best_metrics["AUROC"],
+        best_metrics["AUPR"],
+        best_metrics["FPR95"],
     )
-    print(
-        "Test metrics       | "
-        f"AUROC: {test_metrics['AUROC']:.4f}, "
-        f"AUPR: {test_metrics['AUPR']:.4f}, "
-        f"FPR@95TPR: {test_metrics['FPR95']:.4f}"
+    LOGGER.info(
+        "split=test AUROC=%.4f AUPR=%.4f FPR95=%.4f",
+        test_metrics["AUROC"],
+        test_metrics["AUPR"],
+        test_metrics["FPR95"],
     )
-    print(f"Saved calibration artifact to: {args.save_path}")
+    LOGGER.info("saved=%s", args.save_path)
 
 
 if __name__ == "__main__":

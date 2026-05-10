@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import random
 import time
@@ -18,9 +19,11 @@ from core_model import evaluate_ood_metrics
 
 ID_CLASSES = (0, 1, 2, 3)
 OOD_CLASSES = (4, 5, 6)
+LOGGER = logging.getLogger(__name__)
 
 
 def set_seed(seed: int) -> None:
+    """Set random seeds for baseline evaluation."""
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -31,6 +34,7 @@ def set_seed(seed: int) -> None:
 
 
 def build_leave_out_masks(y: torch.Tensor, train_ratio: float, seed: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Build train and evaluation masks for the baseline protocol."""
     labels = torch.ones_like(y, dtype=torch.long)
     id_mask = torch.zeros_like(y, dtype=torch.bool)
     for cls in ID_CLASSES:
@@ -53,14 +57,15 @@ def build_leave_out_masks(y: torch.Tensor, train_ratio: float, seed: int) -> tup
     eval_id_mask = torch.zeros_like(y, dtype=torch.bool)
     eval_id_mask[id_indices[perm[train_size:]]] = True
 
-    assert labels[train_mask].sum().item() == 0, "Data leakage: train_mask contains OOD nodes."
+    if labels[train_mask].sum().item() != 0:
+        raise RuntimeError("Training mask contains OOD nodes.")
     return train_mask, eval_id_mask, ood_mask
 
 
 class BaselineGCN(torch.nn.Module):
     """A standard two-layer GCN classifier trained only on ID classes."""
 
-    def __init__(self, in_channels: int, hidden_channels: int, num_classes: int, dropout: float = 0.5):
+    def __init__(self, in_channels: int, hidden_channels: int, num_classes: int, dropout: float = 0.5) -> None:
         super().__init__()
         self.dropout = dropout
         self.conv1 = GCNConv(in_channels, hidden_channels)
@@ -74,6 +79,7 @@ class BaselineGCN(torch.nn.Module):
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="GCN MSP baseline for Cora OOD detection.")
     parser.add_argument("--data_root", type=str, default="./data")
     parser.add_argument("--epochs", type=int, default=150)
@@ -86,6 +92,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """Train and evaluate the MSP baseline."""
+    logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
     args = parse_args()
     set_seed(args.seed)
 
@@ -101,8 +109,13 @@ def main() -> None:
     model = BaselineGCN(dataset.num_features, args.hidden_channels, len(ID_CLASSES)).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
-    print("=== Baseline: GCN + Maximum Softmax Probability ===")
-    print(f"Train ID nodes: {int(train_mask.sum())} | Eval ID nodes: {int(eval_id_mask.sum())} | OOD nodes: {int(eval_ood_mask.sum())}")
+    LOGGER.info("Baseline: GCN with maximum softmax probability")
+    LOGGER.info(
+        "train_id_nodes=%d eval_id_nodes=%d ood_nodes=%d",
+        int(train_mask.sum()),
+        int(eval_id_mask.sum()),
+        int(eval_ood_mask.sum()),
+    )
 
     for epoch in range(1, args.epochs + 1):
         model.train()
@@ -113,7 +126,7 @@ def main() -> None:
         optimizer.step()
 
         if epoch == 1 or epoch % 10 == 0 or epoch == args.epochs:
-            print(f"Epoch {epoch:03d}/{args.epochs} | CE Loss: {loss.item():.6f}")
+            LOGGER.info("epoch=%03d/%03d ce_loss=%.6f", epoch, args.epochs, loss.item())
 
     model.eval()
     if device.type == "cuda":
@@ -128,10 +141,10 @@ def main() -> None:
     latency_ms = (time.perf_counter() - start_time) * 1000.0
 
     metrics = evaluate_ood_metrics(anomaly_scores[eval_id_mask], anomaly_scores[eval_ood_mask])
-    print(f"AUROC: {metrics['AUROC']:.4f}")
-    print(f"AUPR: {metrics['AUPR']:.4f}")
-    print(f"FPR@95TPR: {metrics['FPR95']:.4f}")
-    print(f"Full-graph latency: {latency_ms:.4f} ms")
+    LOGGER.info("AUROC=%.4f", metrics["AUROC"])
+    LOGGER.info("AUPR=%.4f", metrics["AUPR"])
+    LOGGER.info("FPR95=%.4f", metrics["FPR95"])
+    LOGGER.info("latency_ms=%.4f", latency_ms)
 
 
 if __name__ == "__main__":

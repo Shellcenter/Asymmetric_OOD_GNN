@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import random
 
@@ -17,9 +18,11 @@ from core_model import AsymmetricGNN
 
 ID_CLASSES = (0, 1, 2, 3)
 OOD_CLASSES = (4, 5, 6)
+LOGGER = logging.getLogger(__name__)
 
 
 def set_seed(seed: int) -> None:
+    """Set random seeds for visualization."""
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -28,6 +31,7 @@ def set_seed(seed: int) -> None:
 
 
 def build_binary_labels(y: torch.Tensor) -> torch.Tensor:
+    """Map Cora labels to binary ID/OOD labels."""
     labels = torch.ones_like(y, dtype=torch.long)
     id_mask = torch.zeros_like(y, dtype=torch.bool)
     for cls in ID_CLASSES:
@@ -37,6 +41,7 @@ def build_binary_labels(y: torch.Tensor) -> torch.Tensor:
 
 
 def load_model(checkpoint_path: str, dataset_num_features: int, device: torch.device) -> AsymmetricGNN:
+    """Load a distilled GNN checkpoint."""
     checkpoint = torch.load(checkpoint_path, map_location=device)
     if "model_state_dict" in checkpoint:
         state_dict = checkpoint["model_state_dict"]
@@ -56,6 +61,7 @@ def load_model(checkpoint_path: str, dataset_num_features: int, device: torch.de
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Visualize GNN topology embeddings with T-SNE.")
     parser.add_argument("--data_root", type=str, default="./data")
     parser.add_argument("--weights_path", type=str, default="./weights/cora_gnn.pth")
@@ -66,6 +72,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """Generate a T-SNE plot of topology embeddings."""
+    logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
     args = parse_args()
     set_seed(args.seed)
 
@@ -81,7 +89,7 @@ def main() -> None:
     with torch.no_grad():
         z_topo = model(data.x, data.edge_index).detach().cpu().numpy()
 
-    print("Running T-SNE on distilled topological embeddings...")
+    LOGGER.info("running_tsne=true")
     try:
         tsne = TSNE(n_components=2, perplexity=args.perplexity, max_iter=1000, init="pca", random_state=args.seed)
     except TypeError:
@@ -102,7 +110,7 @@ def main() -> None:
 
     os.makedirs(os.path.dirname(args.output_path), exist_ok=True)
     plt.savefig(args.output_path, format="pdf", dpi=300, bbox_inches="tight")
-    print(f"Saved paper-ready visualization to: {args.output_path}")
+    LOGGER.info("saved=%s", args.output_path)
 
 
 if __name__ == "__main__":

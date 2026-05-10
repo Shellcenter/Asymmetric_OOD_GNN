@@ -10,13 +10,15 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import logging
 import os
 import random
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 
 import numpy as np
 import torch
 import torch.nn.functional as F
+from torch_geometric.data import Data
 from torch_geometric.datasets import Planetoid
 
 from core_model import (
@@ -32,10 +34,13 @@ from core_model import (
 
 ID_CLASSES = (0, 1, 2, 3)
 OOD_CLASSES = (4, 5, 6)
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
 class EnergyConfig:
+    """Energy-boundary hyperparameter configuration."""
+
     name: str
     energy_weight: float
     energy_margin: float
@@ -47,6 +52,8 @@ class EnergyConfig:
 
 @dataclass
 class SplitMasks:
+    """Boolean masks for fixed train/evaluation splits."""
+
     train_id: torch.Tensor
     eval_id: torch.Tensor
     eval_ood: torch.Tensor
@@ -54,6 +61,8 @@ class SplitMasks:
 
 @dataclass
 class RobustSplitMasks:
+    """Boolean masks for robust calibration splits."""
+
     val_id: torch.Tensor
     test_id: torch.Tensor
     val_ood: torch.Tensor
@@ -61,6 +70,7 @@ class RobustSplitMasks:
 
 
 def set_seed(seed: int) -> None:
+    """Set random seeds for sweep reproducibility."""
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -86,6 +96,7 @@ def parse_config(raw: str) -> EnergyConfig:
 
 
 def build_masks(y: torch.Tensor, train_ratio: float, seed: int) -> SplitMasks:
+    """Build the fixed train/evaluation split."""
     id_mask = torch.zeros_like(y, dtype=torch.bool)
     for cls in ID_CLASSES:
         id_mask |= y == cls
@@ -108,17 +119,20 @@ def build_masks(y: torch.Tensor, train_ratio: float, seed: int) -> SplitMasks:
     train_id[id_indices[perm[:train_size]]] = True
     eval_id[id_indices[perm[train_size:]]] = True
 
-    assert labels[train_id].sum().item() == 0, "Data leakage: train split contains OOD nodes."
+    if labels[train_id].sum().item() != 0:
+        raise RuntimeError("Training split contains OOD nodes.")
     return SplitMasks(train_id=train_id, eval_id=eval_id, eval_ood=ood_mask)
 
 
 def _split_indices(indices: torch.Tensor, first_ratio: float, generator: torch.Generator) -> tuple[torch.Tensor, torch.Tensor]:
+    """Split indices with a deterministic generator."""
     perm = torch.randperm(indices.numel(), generator=generator, device=indices.device)
     first_size = int(first_ratio * indices.numel())
     return indices[perm[:first_size]], indices[perm[first_size:]]
 
 
 def build_robust_masks(y: torch.Tensor, train_ratio: float, val_ratio: float, seed: int) -> RobustSplitMasks:
+    """Build validation and test masks for robust calibration."""
     id_mask = torch.zeros_like(y, dtype=torch.bool)
     for cls in ID_CLASSES:
         id_mask |= y == cls
@@ -150,7 +164,7 @@ def build_robust_masks(y: torch.Tensor, train_ratio: float, val_ratio: float, se
 
 
 def train_one_config(
-    data,
+    data: Data,
     num_features: int,
     anchors: torch.Tensor,
     masks: SplitMasks,
@@ -213,7 +227,7 @@ def train_one_config(
 
 def evaluate_single_split(
     model: AsymmetricGNN,
-    data,
+    data: Data,
     prototypes: torch.Tensor,
     masks: SplitMasks,
     logit_scale: float,
@@ -229,7 +243,7 @@ def evaluate_single_split(
 
 def robust_calibrate(
     model: AsymmetricGNN,
-    data,
+    data: Data,
     prototypes: torch.Tensor,
     logit_scales: list[float],
     temp_grid: list[float],
@@ -286,6 +300,7 @@ def robust_calibrate(
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Sweep energy-boundary training settings.")
     parser.add_argument("--data_root", type=str, default="./data")
     parser.add_argument("--anchor_path", type=str, default="./embeddings/cora_llm_anchor.pt")
@@ -320,6 +335,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """Run the energy-boundary sweep."""
+    logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
     args = parse_args()
     set_seed(args.base_seed)
     if not os.path.exists(args.anchor_path):
@@ -338,7 +355,12 @@ def main() -> None:
 
     rows = []
     for config in configs:
-        print(f"=== Sweeping {config.name} | weight={config.energy_weight}, margin={config.energy_margin} ===")
+        LOGGER.info(
+            "sweep_config=%s energy_weight=%.4f energy_margin=%.4f",
+            config.name,
+            config.energy_weight,
+            config.energy_margin,
+        )
         set_seed(args.base_seed)
         model, prototypes, losses = train_one_config(data, dataset.num_features, anchors, masks, config, args, device)
         single_metrics = evaluate_single_split(
@@ -385,12 +407,20 @@ def main() -> None:
             "checkpoint": checkpoint_path,
         }
         rows.append(row)
-        print(
-            f"{config.name}: single AUROC={single_metrics['AUROC']:.4f}, "
-            f"AUPR={single_metrics['AUPR']:.4f}, FPR95={single_metrics['FPR95']:.4f} | "
-            f"robust AUROC={robust_metrics['AUROC_mean']:.4f}±{robust_metrics['AUROC_std']:.4f}, "
-            f"AUPR={robust_metrics['AUPR_mean']:.4f}±{robust_metrics['AUPR_std']:.4f}, "
-            f"FPR95={robust_metrics['FPR95_mean']:.4f}±{robust_metrics['FPR95_std']:.4f}"
+        LOGGER.info(
+            "%s single_AUROC=%.4f single_AUPR=%.4f single_FPR95=%.4f "
+            "robust_AUROC=%.4f+/-%.4f robust_AUPR=%.4f+/-%.4f "
+            "robust_FPR95=%.4f+/-%.4f",
+            config.name,
+            single_metrics["AUROC"],
+            single_metrics["AUPR"],
+            single_metrics["FPR95"],
+            robust_metrics["AUROC_mean"],
+            robust_metrics["AUROC_std"],
+            robust_metrics["AUPR_mean"],
+            robust_metrics["AUPR_std"],
+            robust_metrics["FPR95_mean"],
+            robust_metrics["FPR95_std"],
         )
 
     json_path = os.path.join(args.output_dir, "summary.json")
@@ -403,13 +433,17 @@ def main() -> None:
         writer.writerows(rows)
 
     best = min(rows, key=lambda item: (item["FPR95_mean"], -item["AUROC_mean"]))
-    print("=== Best by robust FPR95 ===")
-    print(
-        f"{best['name']} | AUROC={best['AUROC_mean']:.4f}±{best['AUROC_std']:.4f}, "
-        f"AUPR={best['AUPR_mean']:.4f}±{best['AUPR_std']:.4f}, "
-        f"FPR95={best['FPR95_mean']:.4f}±{best['FPR95_std']:.4f}"
+    LOGGER.info(
+        "best_config=%s AUROC=%.4f+/-%.4f AUPR=%.4f+/-%.4f FPR95=%.4f+/-%.4f",
+        best["name"],
+        best["AUROC_mean"],
+        best["AUROC_std"],
+        best["AUPR_mean"],
+        best["AUPR_std"],
+        best["FPR95_mean"],
+        best["FPR95_std"],
     )
-    print(f"Saved sweep summaries to: {json_path} and {csv_path}")
+    LOGGER.info("saved_json=%s saved_csv=%s", json_path, csv_path)
 
 
 if __name__ == "__main__":

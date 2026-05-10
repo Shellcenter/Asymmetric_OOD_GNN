@@ -10,6 +10,7 @@ This script performs a stable post-hoc calibration procedure:
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import random
 from dataclasses import dataclass
@@ -23,9 +24,11 @@ from core_model import AsymmetricGNN, compute_free_energy, compute_prototype_log
 
 ID_CLASSES = (0, 1, 2, 3)
 OOD_CLASSES = (4, 5, 6)
+LOGGER = logging.getLogger(__name__)
 
 
 def set_seed(seed: int) -> None:
+    """Set random seeds for robust calibration."""
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -35,6 +38,8 @@ def set_seed(seed: int) -> None:
 
 @dataclass
 class SplitMasks:
+    """Boolean masks for robust calibration splits."""
+
     train_id: torch.Tensor
     val_id: torch.Tensor
     test_id: torch.Tensor
@@ -43,12 +48,14 @@ class SplitMasks:
 
 
 def _split_indices(indices: torch.Tensor, first_ratio: float, generator: torch.Generator) -> tuple[torch.Tensor, torch.Tensor]:
+    """Split indices with a deterministic generator."""
     perm = torch.randperm(indices.numel(), generator=generator, device=indices.device)
     first_size = int(first_ratio * indices.numel())
     return indices[perm[:first_size]], indices[perm[first_size:]]
 
 
 def build_protocol_masks(y: torch.Tensor, train_ratio: float, val_ratio: float, seed: int) -> SplitMasks:
+    """Build train, validation, and test masks."""
     id_mask = torch.zeros_like(y, dtype=torch.bool)
     for cls in ID_CLASSES:
         id_mask |= y == cls
@@ -83,6 +90,7 @@ def build_protocol_masks(y: torch.Tensor, train_ratio: float, val_ratio: float, 
 
 
 def load_model(checkpoint_path: str, in_channels: int, device: torch.device) -> tuple[AsymmetricGNN, dict]:
+    """Load a prototype-calibrated GNN checkpoint."""
     checkpoint = torch.load(checkpoint_path, map_location=device)
     if "model_state_dict" not in checkpoint:
         raise KeyError("Expected checkpoint with `model_state_dict` and prototype metadata.")
@@ -100,6 +108,7 @@ def load_model(checkpoint_path: str, in_channels: int, device: torch.device) -> 
 
 
 def parse_float_list(raw: str) -> list[float]:
+    """Parse a comma-separated list of floats."""
     values = [float(x.strip()) for x in raw.split(",") if x.strip()]
     if not values:
         raise ValueError("Received empty float list.")
@@ -107,6 +116,7 @@ def parse_float_list(raw: str) -> list[float]:
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Robust free-energy calibration for asymmetric OOD detection.")
     parser.add_argument("--data_root", type=str, default="./data")
     parser.add_argument("--weights_path", type=str, default="./weights/cora_gnn.pth")
@@ -124,11 +134,14 @@ def parse_args() -> argparse.Namespace:
 
 
 def aggregate_stats(values: list[float]) -> tuple[float, float]:
+    """Return mean and population standard deviation."""
     arr = np.asarray(values, dtype=np.float64)
     return float(arr.mean()), float(arr.std(ddof=0))
 
 
 def main() -> None:
+    """Run robust calibration over multiple splits."""
+    logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
     args = parse_args()
     set_seed(args.base_seed)
 
@@ -193,7 +206,6 @@ def main() -> None:
             }
         )
 
-    # Use robust aggregate settings for a final pass over all test splits.
     recommended_scale = float(np.median(np.asarray(chosen_scales, dtype=np.float64)))
     recommended_temperature = float(np.median(np.asarray(chosen_temps, dtype=np.float64)))
 
@@ -243,17 +255,20 @@ def main() -> None:
         args.save_path,
     )
 
-    print("=== Phase 7: Robust Multi-Seed Calibration ===")
-    print(f"Seeds: {args.base_seed} .. {args.base_seed + args.num_seeds - 1}")
-    print(f"Recommended logit_scale (median): {recommended_scale:.4f}")
-    print(f"Recommended temperature (median): {recommended_temperature:.4f}")
-    print(
-        "Aggregate test metrics | "
-        f"AUROC: {auroc_mean:.4f} ± {auroc_std:.4f}, "
-        f"AUPR: {aupr_mean:.4f} ± {aupr_std:.4f}, "
-        f"FPR@95TPR: {fpr95_mean:.4f} ± {fpr95_std:.4f}"
+    LOGGER.info("Phase 7: robust multi-seed calibration")
+    LOGGER.info("seed_range=%d-%d", args.base_seed, args.base_seed + args.num_seeds - 1)
+    LOGGER.info("recommended_logit_scale=%.4f", recommended_scale)
+    LOGGER.info("recommended_temperature=%.4f", recommended_temperature)
+    LOGGER.info(
+        "test AUROC=%.4f+/-%.4f AUPR=%.4f+/-%.4f FPR95=%.4f+/-%.4f",
+        auroc_mean,
+        auroc_std,
+        aupr_mean,
+        aupr_std,
+        fpr95_mean,
+        fpr95_std,
     )
-    print(f"Saved robust calibration artifact to: {args.save_path}")
+    LOGGER.info("saved=%s", args.save_path)
 
 
 if __name__ == "__main__":

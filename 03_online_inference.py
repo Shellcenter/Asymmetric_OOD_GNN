@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import random
 import time
@@ -16,9 +17,11 @@ from core_model import AsymmetricGNN, compute_free_energy, compute_prototype_log
 
 ID_CLASSES = (0, 1, 2, 3)
 OOD_CLASSES = (4, 5, 6)
+LOGGER = logging.getLogger(__name__)
 
 
 def set_seed(seed: int) -> None:
+    """Set random seeds for evaluation."""
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -27,6 +30,7 @@ def set_seed(seed: int) -> None:
 
 
 def build_eval_masks(y: torch.Tensor, train_ratio: float, seed: int) -> tuple[torch.Tensor, torch.Tensor]:
+    """Build evaluation masks under the leave-out protocol."""
     id_mask = torch.zeros_like(y, dtype=torch.bool)
     for cls in ID_CLASSES:
         id_mask |= y == cls
@@ -47,6 +51,7 @@ def build_eval_masks(y: torch.Tensor, train_ratio: float, seed: int) -> tuple[to
 
 
 def load_model(checkpoint_path: str, dataset_num_features: int, device: torch.device) -> tuple[AsymmetricGNN, dict]:
+    """Load a distilled GNN checkpoint."""
     checkpoint = torch.load(checkpoint_path, map_location=device)
     if "model_state_dict" in checkpoint:
         config = checkpoint
@@ -72,6 +77,7 @@ def load_model(checkpoint_path: str, dataset_num_features: int, device: torch.de
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Online asymmetric OOD inference on Cora.")
     parser.add_argument("--data_root", type=str, default="./data")
     parser.add_argument("--weights_path", type=str, default="./weights/cora_gnn.pth")
@@ -83,6 +89,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """Run online asymmetric inference."""
+    logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
     args = parse_args()
     set_seed(args.seed)
 
@@ -120,7 +128,6 @@ def main() -> None:
     start_time = time.perf_counter()
     with torch.no_grad():
         for _ in range(args.runs):
-            # Online contract: the model receives only graph topology features and edge_index.
             z_topo = model(data.x, data.edge_index)
             logits = compute_prototype_logits(z_topo, id_prototypes, logit_scale=logit_scale)
             energy = compute_free_energy(logits, temperature=args.temperature)
@@ -130,12 +137,11 @@ def main() -> None:
 
     metrics = evaluate_ood_metrics(energy[eval_id_mask], energy[eval_ood_mask])
 
-    print("=== Phase 3: Online Asymmetric Inference ===")
-    print("LLM features are not loaded. Input contract: model(x, edge_index) plus frozen ID prototypes.")
-    print(f"AUROC: {metrics['AUROC']:.4f}")
-    print(f"AUPR: {metrics['AUPR']:.4f}")
-    print(f"FPR@95TPR: {metrics['FPR95']:.4f}")
-    print(f"Average full-graph latency over {args.runs} runs: {latency_ms:.4f} ms")
+    LOGGER.info("Phase 3: online asymmetric inference")
+    LOGGER.info("AUROC=%.4f", metrics["AUROC"])
+    LOGGER.info("AUPR=%.4f", metrics["AUPR"])
+    LOGGER.info("FPR95=%.4f", metrics["FPR95"])
+    LOGGER.info("latency_ms=%.4f runs=%d", latency_ms, args.runs)
 
 
 if __name__ == "__main__":

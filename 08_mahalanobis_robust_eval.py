@@ -9,6 +9,7 @@ Protocol guarantees:
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import random
 from dataclasses import dataclass
@@ -28,9 +29,11 @@ from core_model import (
 
 ID_CLASSES = (0, 1, 2, 3)
 OOD_CLASSES = (4, 5, 6)
+LOGGER = logging.getLogger(__name__)
 
 
 def set_seed(seed: int) -> None:
+    """Set random seeds for evaluation."""
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -40,6 +43,8 @@ def set_seed(seed: int) -> None:
 
 @dataclass
 class SplitMasks:
+    """Boolean masks for Mahalanobis calibration splits."""
+
     train_id: torch.Tensor
     val_id: torch.Tensor
     test_id: torch.Tensor
@@ -48,12 +53,14 @@ class SplitMasks:
 
 
 def _split_indices(indices: torch.Tensor, first_ratio: float, generator: torch.Generator) -> tuple[torch.Tensor, torch.Tensor]:
+    """Split indices with a deterministic generator."""
     perm = torch.randperm(indices.numel(), generator=generator, device=indices.device)
     first_size = int(first_ratio * indices.numel())
     return indices[perm[:first_size]], indices[perm[first_size:]]
 
 
 def build_protocol_masks(y: torch.Tensor, train_ratio: float, val_ratio: float, seed: int) -> SplitMasks:
+    """Build train, validation, and test masks."""
     id_mask = torch.zeros_like(y, dtype=torch.bool)
     for cls in ID_CLASSES:
         id_mask |= y == cls
@@ -88,6 +95,7 @@ def build_protocol_masks(y: torch.Tensor, train_ratio: float, val_ratio: float, 
 
 
 def load_model(weights_path: str, in_channels: int, device: torch.device) -> AsymmetricGNN:
+    """Load a distilled GNN checkpoint."""
     checkpoint = torch.load(weights_path, map_location=device)
     if "model_state_dict" in checkpoint:
         state_dict = checkpoint["model_state_dict"]
@@ -111,11 +119,13 @@ def load_model(weights_path: str, in_channels: int, device: torch.device) -> Asy
 
 
 def aggregate(values: list[float]) -> tuple[float, float]:
+    """Return mean and population standard deviation."""
     arr = np.asarray(values, dtype=np.float64)
     return float(arr.mean()), float(arr.std(ddof=0))
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Robust Mahalanobis OOD evaluation on Cora.")
     parser.add_argument("--data_root", type=str, default="./data")
     parser.add_argument("--weights_path", type=str, default="./weights/cora_gnn.pth")
@@ -133,6 +143,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """Evaluate Mahalanobis OOD scoring over multiple splits."""
+    logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
     args = parse_args()
     set_seed(args.base_seed)
     if not os.path.exists(args.weights_path):
@@ -240,16 +252,19 @@ def main() -> None:
         args.save_path,
     )
 
-    print("=== Phase 8: Mahalanobis Robust Evaluation ===")
-    print(f"Seeds: {args.base_seed} .. {args.base_seed + args.num_seeds - 1}")
-    print(f"Recommended temperature (median): {recommended_temperature:.4f}")
-    print(
-        "Aggregate test metrics | "
-        f"AUROC: {auroc_mean:.4f} ± {auroc_std:.4f}, "
-        f"AUPR: {aupr_mean:.4f} ± {aupr_std:.4f}, "
-        f"FPR@95TPR: {fpr95_mean:.4f} ± {fpr95_std:.4f}"
+    LOGGER.info("Phase 8: Mahalanobis robust evaluation")
+    LOGGER.info("seed_range=%d-%d", args.base_seed, args.base_seed + args.num_seeds - 1)
+    LOGGER.info("recommended_temperature=%.4f", recommended_temperature)
+    LOGGER.info(
+        "test AUROC=%.4f+/-%.4f AUPR=%.4f+/-%.4f FPR95=%.4f+/-%.4f",
+        auroc_mean,
+        auroc_std,
+        aupr_mean,
+        aupr_std,
+        fpr95_mean,
+        fpr95_std,
     )
-    print(f"Saved Mahalanobis artifact to: {args.save_path}")
+    LOGGER.info("saved=%s", args.save_path)
 
 
 if __name__ == "__main__":
