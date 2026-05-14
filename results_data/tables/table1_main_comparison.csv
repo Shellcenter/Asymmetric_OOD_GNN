@@ -1,0 +1,5 @@
+method,AUROC,AUPR,FPR95,Latency,LLM_at_inference,n_seeds,notes
+GCN-MSP,0.8092 +/- 0.0166,0.8147 +/- 0.0195,0.5935 +/- 0.0375,5.79 ms,No,10,
+Classifier-only,0.8053 +/- 0.0165,0.8084 +/- 0.0213,0.5931 +/- 0.0302,2.19 ms,No,10,
+Ours-light,0.8054 +/- 0.0161,0.8089 +/- 0.0205,0.5922 +/- 0.0300,2.29 ms,No,10,"hidden=64, semantic=0.005, prototype=0.01, energy=0.0, score=classifier_msp"
+Ours-energy-light,0.8051 +/- 0.0162,0.8086 +/- 0.0202,0.5961 +/- 0.0300,1.96 ms,No,10,"hidden=64, semantic=0.005, prototype=0.01, energy=0.001, score=classifier_msp"

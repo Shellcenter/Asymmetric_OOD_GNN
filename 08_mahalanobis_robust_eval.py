@@ -112,8 +112,9 @@ def load_model(weights_path: str, in_channels: int, device: torch.device) -> Asy
         in_channels=model_in_channels,
         hidden_channels=hidden_channels,
         out_channels=out_channels,
+        num_classes=len(ID_CLASSES),
     ).to(device)
-    model.load_state_dict(state_dict)
+    model.load_state_dict(state_dict, strict=False)
     model.eval()
     return model
 

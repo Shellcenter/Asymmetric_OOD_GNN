@@ -10,6 +10,7 @@ import time
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from torch_geometric.datasets import Planetoid
 
 from core_model import AsymmetricGNN, compute_free_energy, compute_prototype_logits, evaluate_ood_metrics
@@ -70,8 +71,10 @@ def load_model(checkpoint_path: str, dataset_num_features: int, device: torch.de
         in_channels=config.get("in_channels", dataset_num_features),
         hidden_channels=config.get("hidden_channels", 128),
         out_channels=config["out_channels"],
+        num_classes=config.get("num_classes", len(ID_CLASSES)),
     ).to(device)
-    model.load_state_dict(state_dict)
+    missing, _ = model.load_state_dict(state_dict, strict=False)
+    config["has_classifier"] = not any(key.startswith("classifier_conv.") for key in missing)
     model.eval()
     return model, config
 
@@ -85,6 +88,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--warmup", type=int, default=5)
     parser.add_argument("--runs", type=int, default=20)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--score_method",
+        type=str,
+        default="auto",
+        choices=("auto", "classifier_energy", "classifier_msp", "prototype_energy", "prototype_msp"),
+    )
     return parser.parse_args()
 
 
@@ -109,6 +118,9 @@ def main() -> None:
         )
     id_prototypes = config["id_prototypes"].to(device).float()
     logit_scale = float(config.get("logit_scale", 10.0))
+    score_method = args.score_method
+    if score_method == "auto":
+        score_method = "classifier_energy" if config.get("has_classifier", False) else "prototype_energy"
     eval_id_mask, eval_ood_mask = build_eval_masks(
         data.y,
         train_ratio=float(config.get("train_ratio", 0.6)),
@@ -119,25 +131,40 @@ def main() -> None:
 
     with torch.no_grad():
         for _ in range(args.warmup):
-            z_topo = model(data.x, data.edge_index)
-            logits = compute_prototype_logits(z_topo, id_prototypes, logit_scale=logit_scale)
-            _ = compute_free_energy(logits, temperature=args.temperature)
+            h_topo = model.encode(data.x, data.edge_index)
+            if score_method.startswith("classifier"):
+                logits = model.classify(data.x, data.edge_index)
+            else:
+                z_topo = model.project(h_topo)
+                logits = compute_prototype_logits(z_topo, id_prototypes, logit_scale=logit_scale)
+            if score_method.endswith("energy"):
+                _ = compute_free_energy(logits, temperature=args.temperature)
+            else:
+                _ = 1.0 - F.softmax(logits, dim=1).max(dim=1).values
 
     if device.type == "cuda":
         torch.cuda.synchronize()
     start_time = time.perf_counter()
     with torch.no_grad():
         for _ in range(args.runs):
-            z_topo = model(data.x, data.edge_index)
-            logits = compute_prototype_logits(z_topo, id_prototypes, logit_scale=logit_scale)
-            energy = compute_free_energy(logits, temperature=args.temperature)
+            h_topo = model.encode(data.x, data.edge_index)
+            if score_method.startswith("classifier"):
+                logits = model.classify(data.x, data.edge_index)
+            else:
+                z_topo = model.project(h_topo)
+                logits = compute_prototype_logits(z_topo, id_prototypes, logit_scale=logit_scale)
+            if score_method.endswith("energy"):
+                scores = compute_free_energy(logits, temperature=args.temperature)
+            else:
+                scores = 1.0 - F.softmax(logits, dim=1).max(dim=1).values
     if device.type == "cuda":
         torch.cuda.synchronize()
     latency_ms = (time.perf_counter() - start_time) * 1000.0 / args.runs
 
-    metrics = evaluate_ood_metrics(energy[eval_id_mask], energy[eval_ood_mask])
+    metrics = evaluate_ood_metrics(scores[eval_id_mask], scores[eval_ood_mask])
 
     LOGGER.info("Phase 3: online asymmetric inference")
+    LOGGER.info("score_method=%s", score_method)
     LOGGER.info("AUROC=%.4f", metrics["AUROC"])
     LOGGER.info("AUPR=%.4f", metrics["AUPR"])
     LOGGER.info("FPR95=%.4f", metrics["FPR95"])

@@ -101,8 +101,10 @@ def load_model(checkpoint_path: str, in_channels: int, device: torch.device) -> 
         in_channels=checkpoint.get("in_channels", in_channels),
         hidden_channels=checkpoint.get("hidden_channels", 128),
         out_channels=checkpoint["out_channels"],
+        num_classes=checkpoint.get("num_classes", len(ID_CLASSES)),
     ).to(device)
-    model.load_state_dict(checkpoint["model_state_dict"])
+    missing, _ = model.load_state_dict(checkpoint["model_state_dict"], strict=False)
+    checkpoint["has_classifier"] = not any(key.startswith("classifier_conv.") for key in missing)
     model.eval()
     return model, checkpoint
 
@@ -129,6 +131,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--temp_steps", type=int, default=50)
     parser.add_argument("--logit_scales", type=str, default="5,10,15,20")
     parser.add_argument("--lambda_auroc", type=float, default=0.2, help="score = FPR95 + lambda*(1-AUROC)")
+    parser.add_argument(
+        "--score_source",
+        type=str,
+        default="auto",
+        choices=("auto", "classifier", "prototype"),
+        help="Use classifier logits when available; otherwise fall back to prototype logits.",
+    )
     parser.add_argument("--save_path", type=str, default="./weights/cora_robust_calibration.pt")
     return parser.parse_args()
 
@@ -161,9 +170,14 @@ def main() -> None:
 
     model, checkpoint = load_model(args.weights_path, dataset.num_features, device)
     id_prototypes = checkpoint["id_prototypes"].to(device).float()
+    score_source = args.score_source
+    if score_source == "auto":
+        score_source = "classifier" if checkpoint.get("has_classifier", False) else "prototype"
 
     with torch.no_grad():
-        z_topo = model(data.x, data.edge_index)
+        h_topo = model.encode(data.x, data.edge_index)
+        z_topo = model.project(h_topo)
+        classifier_logits = model.classify(data.x, data.edge_index)
 
     seed_results: list[dict] = []
     chosen_temps: list[float] = []
@@ -178,7 +192,10 @@ def main() -> None:
         best_val_metrics = None
 
         for scale in candidate_scales:
-            logits = compute_prototype_logits(z_topo, id_prototypes, logit_scale=scale)
+            if score_source == "classifier":
+                logits = classifier_logits * scale
+            else:
+                logits = compute_prototype_logits(z_topo, id_prototypes, logit_scale=scale)
             for temp in temp_grid:
                 energy = compute_free_energy(logits, temperature=temp)
                 val_metrics = evaluate_ood_metrics(energy[masks.val_id], energy[masks.val_ood])
@@ -192,7 +209,10 @@ def main() -> None:
         chosen_scales.append(chosen_scale)
         chosen_temps.append(chosen_temp)
 
-        logits_best = compute_prototype_logits(z_topo, id_prototypes, logit_scale=chosen_scale)
+        if score_source == "classifier":
+            logits_best = classifier_logits * chosen_scale
+        else:
+            logits_best = compute_prototype_logits(z_topo, id_prototypes, logit_scale=chosen_scale)
         energy_best = compute_free_energy(logits_best, temperature=chosen_temp)
         test_metrics = evaluate_ood_metrics(energy_best[masks.test_id], energy_best[masks.test_ood])
 
@@ -216,7 +236,10 @@ def main() -> None:
     for offset in range(args.num_seeds):
         split_seed = args.base_seed + offset
         masks = build_protocol_masks(data.y, args.train_ratio, args.val_ratio, split_seed)
-        logits = compute_prototype_logits(z_topo, id_prototypes, logit_scale=recommended_scale)
+        if score_source == "classifier":
+            logits = classifier_logits * recommended_scale
+        else:
+            logits = compute_prototype_logits(z_topo, id_prototypes, logit_scale=recommended_scale)
         energy = compute_free_energy(logits, temperature=recommended_temperature)
         metrics = evaluate_ood_metrics(energy[masks.test_id], energy[masks.test_ood])
         final_test_aurocs.append(metrics["AUROC"])
@@ -235,6 +258,7 @@ def main() -> None:
             "num_seeds": args.num_seeds,
             "base_seed": args.base_seed,
             "lambda_auroc": args.lambda_auroc,
+            "score_source": score_source,
             "seed_results": seed_results,
             "aggregate_test_metrics": {
                 "AUROC_mean": auroc_mean,
@@ -256,6 +280,7 @@ def main() -> None:
     )
 
     LOGGER.info("Phase 7: robust multi-seed calibration")
+    LOGGER.info("score_source=%s", score_source)
     LOGGER.info("seed_range=%d-%d", args.base_seed, args.base_seed + args.num_seeds - 1)
     LOGGER.info("recommended_logit_scale=%.4f", recommended_scale)
     LOGGER.info("recommended_temperature=%.4f", recommended_temperature)

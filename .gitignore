@@ -4,3 +4,5 @@ __pycache__/
 /embeddings/
 *.pt
 *.pth
+logs/
+weights/

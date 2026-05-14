@@ -37,6 +37,7 @@ class AsymmetricGNN(nn.Module):
         in_channels: int,
         hidden_channels: int,
         out_channels: int,
+        num_classes: int = 4,
         dropout: float = 0.5,
         projector_dropout: float = 0.2,
     ):
@@ -44,6 +45,7 @@ class AsymmetricGNN(nn.Module):
         self.dropout = dropout
         self.conv1 = GCNConv(in_channels, hidden_channels)
         self.conv2 = GCNConv(hidden_channels, hidden_channels)
+        self.classifier_conv = GCNConv(hidden_channels, num_classes)
         self.projector = MLPDynamicProjector(
             input_dim=hidden_channels,
             hidden_dim=hidden_channels * 2,
@@ -51,13 +53,24 @@ class AsymmetricGNN(nn.Module):
             dropout=projector_dropout,
         )
 
-    def forward(self, x: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
+    def stem(self, x: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
         h = self.conv1(x, edge_index)
         h = F.relu(h, inplace=True)
-        h = F.dropout(h, p=self.dropout, training=self.training)
+        return F.dropout(h, p=self.dropout, training=self.training)
+
+    def encode(self, x: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
+        h = self.stem(x, edge_index)
         h = self.conv2(h, edge_index)
-        h = F.relu(h, inplace=True)
+        return F.relu(h, inplace=True)
+
+    def project(self, h: torch.Tensor) -> torch.Tensor:
         return self.projector(h)
+
+    def classify(self, x: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
+        return self.classifier_conv(self.stem(x, edge_index), edge_index)
+
+    def forward(self, x: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
+        return self.project(self.encode(x, edge_index))
 
 
 class SupConDistillationLoss(nn.Module):

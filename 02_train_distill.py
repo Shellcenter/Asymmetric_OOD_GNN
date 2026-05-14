@@ -86,6 +86,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--weight_decay", type=float, default=5e-4)
     parser.add_argument("--margin", type=float, default=1.0)
     parser.add_argument("--semantic_weight", type=float, default=0.2)
+    parser.add_argument("--classifier_weight", type=float, default=1.0)
     parser.add_argument("--prototype_weight", type=float, default=1.0)
     parser.add_argument("--energy_weight", type=float, default=0.2)
     parser.add_argument("--energy_compact_weight", type=float, default=0.05)
@@ -124,6 +125,7 @@ def main() -> None:
         in_channels=dataset.num_features,
         hidden_channels=args.hidden_channels,
         out_channels=z_sem_anchor.size(1),
+        num_classes=len(ID_CLASSES),
     ).to(device)
     criterion = SupConDistillationLoss(margin=args.margin)
     energy_criterion = IDEnergyBoundaryLoss(margin=args.energy_margin, compact_weight=args.energy_compact_weight)
@@ -137,7 +139,9 @@ def main() -> None:
     for epoch in range(1, args.epochs + 1):
         model.train()
         optimizer.zero_grad()
-        z_topo = model(data.x, data.edge_index)
+        class_logits = model.classify(data.x, data.edge_index)
+        h_topo = model.encode(data.x, data.edge_index)
+        z_topo = model.project(h_topo)
 
         semantic_loss = criterion(z_topo[train_mask], z_sem_anchor[train_mask], labels[train_mask])
         train_prototypes = compute_class_prototypes(z_topo[train_mask], train_class_labels, ID_CLASSES)
@@ -147,12 +151,14 @@ def main() -> None:
             logit_scale=args.logit_scale,
         )
         prototype_loss = F.cross_entropy(prototype_logits, train_class_labels)
+        classifier_loss = F.cross_entropy(class_logits[train_mask], train_class_labels)
 
-        train_energy = compute_free_energy(prototype_logits, temperature=args.energy_temperature)
+        train_energy = compute_free_energy(class_logits[train_mask], temperature=args.energy_temperature)
         energy_loss, energy_boundary_loss, energy_compact_loss = energy_criterion(train_energy)
 
         loss = (
-            args.semantic_weight * semantic_loss
+            args.classifier_weight * classifier_loss
+            + args.semantic_weight * semantic_loss
             + args.prototype_weight * prototype_loss
             + args.energy_weight * energy_loss
         )
@@ -161,11 +167,12 @@ def main() -> None:
 
         if epoch == 1 or epoch % 10 == 0 or epoch == args.epochs:
             LOGGER.info(
-                "epoch=%03d/%03d loss=%.6f semantic=%.6f prototype_ce=%.6f "
+                "epoch=%03d/%03d loss=%.6f classifier_ce=%.6f semantic=%.6f prototype_ce=%.6f "
                 "energy_boundary=%.6f energy_compact=%.6f",
                 epoch,
                 args.epochs,
                 loss.item(),
+                classifier_loss.item(),
                 semantic_loss.item(),
                 prototype_loss.item(),
                 energy_boundary_loss.item(),
@@ -184,12 +191,14 @@ def main() -> None:
             "in_channels": dataset.num_features,
             "hidden_channels": args.hidden_channels,
             "out_channels": z_sem_anchor.size(1),
+            "num_classes": len(ID_CLASSES),
             "id_classes": ID_CLASSES,
             "ood_classes": OOD_CLASSES,
             "id_prototypes": id_prototypes,
             "logit_scale": args.logit_scale,
             "energy_margin": args.energy_margin,
             "energy_temperature": args.energy_temperature,
+            "classifier_weight": args.classifier_weight,
             "energy_weight": args.energy_weight,
             "energy_compact_weight": args.energy_compact_weight,
             "seed": args.seed,

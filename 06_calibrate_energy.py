@@ -95,8 +95,9 @@ def load_model(checkpoint_path: str, in_channels: int, device: torch.device) -> 
         in_channels=checkpoint.get("in_channels", in_channels),
         hidden_channels=checkpoint.get("hidden_channels", 128),
         out_channels=checkpoint["out_channels"],
+        num_classes=checkpoint.get("num_classes", len(ID_CLASSES)),
     ).to(device)
-    model.load_state_dict(checkpoint["model_state_dict"])
+    model.load_state_dict(checkpoint["model_state_dict"], strict=False)
     model.eval()
     return model, checkpoint
 
