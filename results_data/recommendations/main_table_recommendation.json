@@ -4,17 +4,17 @@
   "recommended_training_command": "python 02_train_distill.py --energy_weight 0.3 --energy_margin -6.0",
   "recommended_calibration_command": "python 07_robust_calibration.py --temp_min 0.05 --temp_max 8.0 --temp_steps 120 --logit_scales 5,10,15,20 --num_seeds 7",
   "main_metrics": {
-    "AUROC": "0.8521 +/- 0.0135",
-    "AUPR": "0.8760 +/- 0.0189",
-    "FPR95": "0.6332 +/- 0.0228",
-    "single_split_AUROC": 0.8390119015517368,
-    "single_split_AUPR": 0.8514547215734528,
-    "single_split_FPR95": 0.6094182825484764
+    "AUROC": "0.7710 +/- 0.0237",
+    "AUPR": "0.8102 +/- 0.0265",
+    "FPR95": "0.8726 +/- 0.0343",
+    "single_split_AUROC": 0.7519526940896724,
+    "single_split_AUPR": 0.7857590802958505,
+    "single_split_FPR95": 0.8587257617728532
   },
   "best_fpr_config": {
     "name": "ew01_m-7",
-    "AUROC": "0.8344 +/- 0.0156",
-    "AUPR": "0.8518 +/- 0.0245",
-    "FPR95": "0.6312 +/- 0.0505"
+    "AUROC": "0.8117 +/- 0.0182",
+    "AUPR": "0.8437 +/- 0.0193",
+    "FPR95": "0.6992 +/- 0.0126"
   }
 }
