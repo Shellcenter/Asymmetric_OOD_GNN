@@ -1,4 +1,4 @@
-"""Legacy entry point for semantic feature extraction."""
+"""Legacy entry point for semantic feature extraction (deprecated, use 01_extract_llm.py)."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ LOGGER = logging.getLogger(__name__)
 
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
-    parser = argparse.ArgumentParser(description="Extract Text Attributes using LLM")
+    parser = argparse.ArgumentParser(description="Semantic feature extraction (deprecated)")
     parser.add_argument("--dataset", type=str, default="Cora")
     return parser.parse_args()
 

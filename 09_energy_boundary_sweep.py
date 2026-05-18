@@ -24,7 +24,7 @@ from torch_geometric.datasets import Planetoid
 from core_model import (
     AsymmetricGNN,
     IDEnergyBoundaryLoss,
-    SupConDistillationLoss,
+    SemanticAlignmentLoss,
     compute_class_prototypes,
     compute_free_energy,
     compute_prototype_logits,
@@ -177,7 +177,7 @@ def train_one_config(
         hidden_channels=args.hidden_channels,
         out_channels=anchors.size(1),
     ).to(device)
-    distill_criterion = SupConDistillationLoss(margin=args.margin)
+    distill_criterion = SemanticAlignmentLoss()
     energy_criterion = IDEnergyBoundaryLoss(
         margin=config.energy_margin,
         compact_weight=config.energy_compact_weight,
@@ -194,7 +194,7 @@ def train_one_config(
         z_topo = model(data.x, data.edge_index)
         train_z = z_topo[masks.train_id]
 
-        semantic_loss = distill_criterion(train_z, anchors[masks.train_id], labels[masks.train_id])
+        semantic_loss = distill_criterion(train_z, anchors[masks.train_id])
         train_prototypes = compute_class_prototypes(train_z, train_class_labels, ID_CLASSES)
         prototype_logits = compute_prototype_logits(train_z, train_prototypes, logit_scale=config.logit_scale)
         prototype_loss = F.cross_entropy(prototype_logits, train_class_labels)
@@ -303,7 +303,7 @@ def parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Sweep energy-boundary training settings.")
     parser.add_argument("--data_root", type=str, default="./data")
-    parser.add_argument("--anchor_path", type=str, default="./embeddings/cora_llm_anchor.pt")
+    parser.add_argument("--anchor_path", type=str, default="./embeddings/cora_semantic_anchor.pt")
     parser.add_argument("--output_dir", type=str, default="./sweep_results/energy_boundary")
     parser.add_argument("--epochs", type=int, default=150)
     parser.add_argument("--hidden_channels", type=int, default=128)
@@ -340,7 +340,7 @@ def main() -> None:
     args = parse_args()
     set_seed(args.base_seed)
     if not os.path.exists(args.anchor_path):
-        raise FileNotFoundError(f"Missing anchors: {args.anchor_path}. Run `python 01_extract_llm.py` first.")
+        raise FileNotFoundError(f"Missing anchors: {args.anchor_path}. Run `python download_cora_vocab.py` then `python 01_extract_llm.py` first.")
 
     os.makedirs(args.output_dir, exist_ok=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

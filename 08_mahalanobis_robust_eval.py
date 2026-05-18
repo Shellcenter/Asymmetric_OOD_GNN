@@ -3,7 +3,7 @@
 Protocol guarantees:
 - GNN training still uses only ID train nodes (already done in Phase 2).
 - Mahalanobis statistics are fit only on ID train nodes of each split.
-- No LLM features are used in this online evaluation stage.
+- No semantic features are used in this online evaluation stage.
 """
 
 from __future__ import annotations

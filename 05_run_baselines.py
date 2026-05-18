@@ -1,4 +1,4 @@
-"""Traditional GCN + MSP baseline under the same Cora leave-out protocol."""
+"""Baseline: standard GCN + MSP OOD detection (Cora + ArXiv)."""
 
 from __future__ import annotations
 
@@ -11,19 +11,16 @@ import time
 import numpy as np
 import torch
 import torch.nn.functional as F
-from torch_geometric.datasets import Planetoid
 from torch_geometric.nn import GCNConv
 
 from core_model import evaluate_ood_metrics
+from data_loader import DatasetName, load_dataset
 
 
-ID_CLASSES = (0, 1, 2, 3)
-OOD_CLASSES = (4, 5, 6)
 LOGGER = logging.getLogger(__name__)
 
 
 def set_seed(seed: int) -> None:
-    """Set random seeds for baseline evaluation."""
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -33,39 +30,8 @@ def set_seed(seed: int) -> None:
         torch.backends.cudnn.benchmark = False
 
 
-def build_leave_out_masks(y: torch.Tensor, train_ratio: float, seed: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Build train and evaluation masks for the baseline protocol."""
-    labels = torch.ones_like(y, dtype=torch.long)
-    id_mask = torch.zeros_like(y, dtype=torch.bool)
-    for cls in ID_CLASSES:
-        id_mask |= y == cls
-    labels[id_mask] = 0
-
-    ood_mask = torch.zeros_like(y, dtype=torch.bool)
-    for cls in OOD_CLASSES:
-        ood_mask |= y == cls
-
-    generator = torch.Generator(device=y.device)
-    generator.manual_seed(seed)
-    id_indices = torch.where(id_mask)[0]
-    perm = torch.randperm(id_indices.numel(), generator=generator, device=y.device)
-    train_size = int(train_ratio * id_indices.numel())
-
-    train_mask = torch.zeros_like(y, dtype=torch.bool)
-    train_mask[id_indices[perm[:train_size]]] = True
-
-    eval_id_mask = torch.zeros_like(y, dtype=torch.bool)
-    eval_id_mask[id_indices[perm[train_size:]]] = True
-
-    if labels[train_mask].sum().item() != 0:
-        raise RuntimeError("Training mask contains OOD nodes.")
-    return train_mask, eval_id_mask, ood_mask
-
-
 class BaselineGCN(torch.nn.Module):
-    """A standard two-layer GCN classifier trained only on ID classes."""
-
-    def __init__(self, in_channels: int, hidden_channels: int, num_classes: int, dropout: float = 0.5) -> None:
+    def __init__(self, in_channels: int, hidden_channels: int, num_classes: int, dropout: float = 0.5):
         super().__init__()
         self.dropout = dropout
         self.conv1 = GCNConv(in_channels, hidden_channels)
@@ -78,12 +44,12 @@ class BaselineGCN(torch.nn.Module):
         return self.conv2(h, edge_index)
 
 
-def parse_args() -> argparse.Namespace:
-    """Parse command-line arguments."""
-    parser = argparse.ArgumentParser(description="GCN MSP baseline for Cora OOD detection.")
+def parse_args():
+    parser = argparse.ArgumentParser(description="GCN MSP baseline for OOD detection.")
+    parser.add_argument("--dataset", type=str, default="cora", choices=("cora", "arxiv"))
     parser.add_argument("--data_root", type=str, default="./data")
     parser.add_argument("--epochs", type=int, default=150)
-    parser.add_argument("--hidden_channels", type=int, default=64)
+    parser.add_argument("--hidden_channels", type=int, default=128)
     parser.add_argument("--lr", type=float, default=0.01)
     parser.add_argument("--weight_decay", type=float, default=5e-4)
     parser.add_argument("--train_ratio", type=float, default=0.6)
@@ -91,40 +57,31 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main() -> None:
-    """Train and evaluate the MSP baseline."""
+def main():
     logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
     args = parse_args()
     set_seed(args.seed)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    dataset = Planetoid(root=os.path.join(args.data_root, "Cora"), name="Cora")
-    data = dataset[0].to(device)
+    ds = load_dataset(
+        name=args.dataset, data_root=args.data_root,
+        train_ratio=args.train_ratio, seed=args.seed, device=device,
+    )
 
-    train_mask, eval_id_mask, eval_ood_mask = build_leave_out_masks(data.y, args.train_ratio, args.seed)
-    train_mask = train_mask.to(device)
-    eval_id_mask = eval_id_mask.to(device)
-    eval_ood_mask = eval_ood_mask.to(device)
-
-    model = BaselineGCN(dataset.num_features, args.hidden_channels, len(ID_CLASSES)).to(device)
+    model = BaselineGCN(ds.num_features, args.hidden_channels, len(ds.id_classes)).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
-    LOGGER.info("Baseline: GCN with maximum softmax probability")
-    LOGGER.info(
-        "train_id_nodes=%d eval_id_nodes=%d ood_nodes=%d",
-        int(train_mask.sum()),
-        int(eval_id_mask.sum()),
-        int(eval_ood_mask.sum()),
-    )
+    LOGGER.info("Baseline: GCN + MSP on %s", args.dataset)
+    LOGGER.info("train=%d eval_id=%d eval_ood=%d",
+                 int(ds.train_mask.sum()), int(ds.eval_id_mask.sum()), int(ds.eval_ood_mask.sum()))
 
     for epoch in range(1, args.epochs + 1):
         model.train()
         optimizer.zero_grad()
-        logits = model(data.x, data.edge_index)
-        loss = F.cross_entropy(logits[train_mask], data.y[train_mask])
+        logits = model(ds.data.x, ds.data.edge_index)
+        loss = F.cross_entropy(logits[ds.train_mask], ds.data.y[ds.train_mask])
         loss.backward()
         optimizer.step()
-
         if epoch == 1 or epoch % 10 == 0 or epoch == args.epochs:
             LOGGER.info("epoch=%03d/%03d ce_loss=%.6f", epoch, args.epochs, loss.item())
 
@@ -133,18 +90,16 @@ def main() -> None:
         torch.cuda.synchronize()
     start_time = time.perf_counter()
     with torch.no_grad():
-        logits = model(data.x, data.edge_index)
+        logits = model(ds.data.x, ds.data.edge_index)
         probs = F.softmax(logits, dim=1)
         anomaly_scores = 1.0 - probs.max(dim=1).values
     if device.type == "cuda":
         torch.cuda.synchronize()
     latency_ms = (time.perf_counter() - start_time) * 1000.0
 
-    metrics = evaluate_ood_metrics(anomaly_scores[eval_id_mask], anomaly_scores[eval_ood_mask])
-    LOGGER.info("AUROC=%.4f", metrics["AUROC"])
-    LOGGER.info("AUPR=%.4f", metrics["AUPR"])
-    LOGGER.info("FPR95=%.4f", metrics["FPR95"])
-    LOGGER.info("latency_ms=%.4f", latency_ms)
+    metrics = evaluate_ood_metrics(anomaly_scores[ds.eval_id_mask], anomaly_scores[ds.eval_ood_mask])
+    LOGGER.info("AUROC=%.4f AUPR=%.4f FPR95=%.4f latency_ms=%.4f",
+                 metrics["AUROC"], metrics["AUPR"], metrics["FPR95"], latency_ms)
 
 
 if __name__ == "__main__":

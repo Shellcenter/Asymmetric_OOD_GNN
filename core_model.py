@@ -73,52 +73,47 @@ class AsymmetricGNN(nn.Module):
         return self.project(self.encode(x, edge_index))
 
 
-class SupConDistillationLoss(nn.Module):
-    """Supervised distillation loss with an optional OOD margin.
+class SemanticAlignmentLoss(nn.Module):
+    """Align GNN topology embeddings to frozen semantic anchors.
 
-    Args:
-        margin: Minimum distance enforced for OOD samples.
-        ood_weight: Weight of the margin term.
+    Minimises L2 distance between normalised GNN embeddings and their
+    corresponding semantic anchors. Only ID nodes are aligned; the loss
+    relies on the assumption that OOD nodes, unseen during training,
+    will naturally deviate further from the learned alignment.
+
+    This replaces the old SupConDistillationLoss which had a dead OOD
+    push term — training splits contain no OOD nodes.
     """
 
-    def __init__(self, margin: float = 1.0, ood_weight: float = 1.0):
+    def __init__(self):
         super().__init__()
-        self.margin = margin
-        self.ood_weight = ood_weight
 
     def forward(
         self,
         z_topo: torch.Tensor,
         z_sem: torch.Tensor,
-        labels: torch.Tensor,
     ) -> torch.Tensor:
-        """Compute the distillation objective.
+        """Compute the alignment objective.
 
         Args:
             z_topo: GNN embeddings with shape ``[N, D]``.
             z_sem: Frozen semantic anchors with shape ``[N, D]``.
-            labels: Binary labels, where 0 denotes ID and 1 denotes OOD.
 
         Returns:
-            Scalar loss.
+            Scalar loss (mean squared L2 distance).
         """
         if z_topo.shape != z_sem.shape:
             raise ValueError(
                 "Topology embeddings and semantic anchors must have identical "
                 f"shape, got {tuple(z_topo.shape)} and {tuple(z_sem.shape)}."
             )
-
         z_topo = F.normalize(z_topo, p=2, dim=1)
         z_sem = F.normalize(z_sem, p=2, dim=1)
-        dist = F.pairwise_distance(z_topo, z_sem, p=2)
+        return F.pairwise_distance(z_topo, z_sem, p=2).pow(2).mean()
 
-        id_mask = labels == 0
-        ood_mask = labels == 1
-        zero = z_topo.new_tensor(0.0)
 
-        pull_id = dist[id_mask].pow(2).mean() if id_mask.any() else zero
-        push_ood = F.relu(self.margin - dist[ood_mask]).pow(2).mean() if ood_mask.any() else zero
-        return pull_id + self.ood_weight * push_ood
+# Legacy alias for backward compatibility with existing checkpoints.
+SupConDistillationLoss = SemanticAlignmentLoss
 
 
 class IDEnergyBoundaryLoss(nn.Module):

@@ -1,4 +1,0 @@
-artifact,path
-Old prototype score diagnostics,results_data/diagnostics/proto_only_score_diagnostics.csv
-Old ew01 score diagnostics,results_data/diagnostics/ew01_m7_score_diagnostics.csv
-Classifier rescue score diagnostics,results_data/diagnostics/rescue_cls_sem_score_diagnostics.csv

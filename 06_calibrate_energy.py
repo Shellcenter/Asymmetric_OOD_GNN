@@ -1,7 +1,7 @@
 """Temperature calibration for prototype-based free-energy OOD scoring.
 
 This script keeps the asymmetric constraint:
-- no LLM features are loaded;
+- no semantic features are loaded;
 - no OOD node is used in model training;
 - temperature is tuned on a held-out validation split and reported on test.
 """

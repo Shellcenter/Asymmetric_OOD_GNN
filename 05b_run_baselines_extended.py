@@ -1,57 +1,25 @@
-"""Extended baselines: GCN trained once, evaluated with Entropy / Energy / MaxLogit."""
+"""Extended baselines: GCN trained once, evaluated with Entropy / Energy / MaxLogit.
+Supports both Cora and ArXiv via unified data loader."""
 
 from __future__ import annotations
 
-import argparse
-import logging
-import os
-import random
-import time
-
+import argparse, logging, os, random, time
 import numpy as np
-import torch
-import torch.nn.functional as F
-from torch_geometric.datasets import Planetoid
+import torch, torch.nn.functional as F
 from torch_geometric.nn import GCNConv
 
 from core_model import compute_free_energy, evaluate_ood_metrics
+from data_loader import DatasetName, load_dataset
 
-ID_CLASSES = (0, 1, 2, 3)
-OOD_CLASSES = (4, 5, 6)
 LOGGER = logging.getLogger(__name__)
 
 
-def set_seed(seed: int) -> None:
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
+def set_seed(seed: int):
+    random.seed(seed); np.random.seed(seed); torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
-
-
-def build_leave_out_masks(y, train_ratio, seed):
-    labels = torch.ones_like(y, dtype=torch.long)
-    id_mask = torch.zeros_like(y, dtype=torch.bool)
-    for cls in ID_CLASSES:
-        id_mask |= y == cls
-    labels[id_mask] = 0
-    ood_mask = torch.zeros_like(y, dtype=torch.bool)
-    for cls in OOD_CLASSES:
-        ood_mask |= y == cls
-
-    generator = torch.Generator(device=y.device)
-    generator.manual_seed(seed)
-    id_indices = torch.where(id_mask)[0]
-    perm = torch.randperm(id_indices.numel(), generator=generator, device=y.device)
-    train_size = int(train_ratio * id_indices.numel())
-
-    train_mask = torch.zeros_like(y, dtype=torch.bool)
-    train_mask[id_indices[perm[:train_size]]] = True
-    eval_id_mask = torch.zeros_like(y, dtype=torch.bool)
-    eval_id_mask[id_indices[perm[train_size:]]] = True
-    return train_mask, eval_id_mask, ood_mask
 
 
 class BaselineGCN(torch.nn.Module):
@@ -68,36 +36,20 @@ class BaselineGCN(torch.nn.Module):
         return self.conv2(h, edge_index)
 
 
-def score_entropy(logits):
-    p = F.softmax(logits, dim=1)
-    return -(p * torch.log(p + 1e-10)).sum(dim=1)
-
-
-def score_msp(logits):
-    return 1.0 - F.softmax(logits, dim=1).max(dim=1).values
-
-
-def score_energy(logits, T=1.0):
-    return compute_free_energy(logits, temperature=T)
-
-
-def score_maxlogit(logits):
-    return -logits.max(dim=1).values
-
-
 SCORERS = {
-    "msp": score_msp,
-    "entropy": score_entropy,
-    "energy": lambda logits: score_energy(logits, T=1.0),
-    "maxlogit": score_maxlogit,
+    "msp": lambda logits: 1.0 - F.softmax(logits, dim=1).max(dim=1).values,
+    "entropy": lambda logits: -(F.softmax(logits, dim=1) * torch.log(F.softmax(logits, dim=1) + 1e-10)).sum(dim=1),
+    "energy": lambda logits: compute_free_energy(logits, temperature=1.0),
+    "maxlogit": lambda logits: -logits.max(dim=1).values,
 }
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Extended GCN baselines.")
+    parser.add_argument("--dataset", type=str, default="cora", choices=("cora", "arxiv"))
     parser.add_argument("--data_root", type=str, default="./data")
     parser.add_argument("--epochs", type=int, default=150)
-    parser.add_argument("--hidden_channels", type=int, default=64)
+    parser.add_argument("--hidden_channels", type=int, default=128)
     parser.add_argument("--lr", type=float, default=0.01)
     parser.add_argument("--weight_decay", type=float, default=5e-4)
     parser.add_argument("--train_ratio", type=float, default=0.6)
@@ -115,31 +67,25 @@ def main():
     set_seed(args.seed)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    dataset = Planetoid(root=os.path.join(args.data_root, "Cora"), name="Cora")
-    data = dataset[0].to(device)
-
-    train_mask, eval_id_mask, eval_ood_mask = build_leave_out_masks(data.y, args.train_ratio, args.seed)
-    train_mask = train_mask.to(device)
-    eval_id_mask = eval_id_mask.to(device)
-    eval_ood_mask = eval_ood_mask.to(device)
+    ds = load_dataset(
+        name=args.dataset, data_root=args.data_root,
+        train_ratio=args.train_ratio, seed=args.seed, device=device,
+    )
 
     os.makedirs(args.output_dir, exist_ok=True)
     os.makedirs(args.results_dir, exist_ok=True)
     os.makedirs(args.weights_dir, exist_ok=True)
 
-    model = BaselineGCN(dataset.num_features, args.hidden_channels, len(ID_CLASSES)).to(device)
+    model = BaselineGCN(ds.num_features, args.hidden_channels, len(ds.id_classes)).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
     for epoch in range(1, args.epochs + 1):
-        model.train()
-        optimizer.zero_grad()
-        logits = model(data.x, data.edge_index)
-        loss = F.cross_entropy(logits[train_mask], data.y[train_mask])
-        loss.backward()
+        model.train(); optimizer.zero_grad()
+        logits = model(ds.data.x, ds.data.edge_index)
+        F.cross_entropy(logits[ds.train_mask], ds.data.y[ds.train_mask]).backward()
         optimizer.step()
 
-    # Save weights
-    weight_path = os.path.join(args.weights_dir, f"seed{args.seed}.pth")
+    weight_path = os.path.join(args.weights_dir, f"{args.dataset}_seed{args.seed}.pth")
     torch.save(model.state_dict(), weight_path)
 
     model.eval()
@@ -155,32 +101,26 @@ def main():
             torch.cuda.synchronize()
         start_time = time.perf_counter()
         with torch.no_grad():
-            logits = model(data.x, data.edge_index)
+            logits = model(ds.data.x, ds.data.edge_index)
             scores = SCORERS[method](logits)
         if device.type == "cuda":
             torch.cuda.synchronize()
         latency_ms = (time.perf_counter() - start_time) * 1000.0
 
-        metrics = evaluate_ood_metrics(scores[eval_id_mask], scores[eval_ood_mask])
-        LOGGER.info("method=%s seed=%d AUROC=%.4f AUPR=%.4f FPR95=%.4f latency_ms=%.4f",
-                     method, args.seed, metrics["AUROC"], metrics["AUPR"], metrics["FPR95"], latency_ms)
-
+        metrics = evaluate_ood_metrics(scores[ds.eval_id_mask], scores[ds.eval_ood_mask])
+        LOGGER.info("dataset=%s method=%s seed=%d AUROC=%.4f AUPR=%.4f FPR95=%.4f latency_ms=%.4f",
+                     args.dataset, method, args.seed, metrics["AUROC"], metrics["AUPR"], metrics["FPR95"], latency_ms)
         results.append({
-            "method": f"GCN-{method.upper()}",
-            "seed": args.seed,
-            "AUROC": round(metrics["AUROC"], 4),
-            "AUPR": round(metrics["AUPR"], 4),
-            "FPR95": round(metrics["FPR95"], 4),
-            "latency_ms": round(latency_ms, 4),
+            "dataset": args.dataset, "method": f"GCN-{method.upper()}", "seed": args.seed,
+            "AUROC": round(metrics["AUROC"], 4), "AUPR": round(metrics["AUPR"], 4),
+            "FPR95": round(metrics["FPR95"], 4), "latency_ms": round(latency_ms, 4),
         })
 
-    log_path = os.path.join(args.output_dir, f"seed{args.seed}.log")
+    log_path = os.path.join(args.output_dir, f"{args.dataset}_seed{args.seed}.log")
     with open(log_path, "w", encoding="utf-8") as f:
         for r in results:
-            f.write(f"method={r['method']} seed={r['seed']} "
-                    f"AUROC={r['AUROC']} AUPR={r['AUPR']} "
-                    f"FPR95={r['FPR95']} latency_ms={r['latency_ms']}\n")
-
+            f.write(f"dataset={r['dataset']} method={r['method']} seed={r['seed']} "
+                    f"AUROC={r['AUROC']} AUPR={r['AUPR']} FPR95={r['FPR95']} latency_ms={r['latency_ms']}\n")
     LOGGER.info("saved=%s", log_path)
 
 
